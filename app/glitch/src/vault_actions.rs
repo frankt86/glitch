@@ -21,28 +21,58 @@ pub fn create_note(vault_root: &Utf8Path, title: &str) -> io::Result<CreatedNote
     let display_title = if title.is_empty() { "Untitled" } else { title };
     let slug = slugify(display_title);
 
+    let now = Timestamp::now().strftime("%Y-%m-%d").to_string();
+    let title_yaml = yaml_scalar(display_title);
+    let body = format!(
+        "---\ntitle: {title_yaml}\ncreated: {now}\ntags: []\n---\n\n# {display_title}\n\n",
+    );
+    write_with_dedup(vault_root, &slug, &body)
+}
+
+/// Create a note from a pre-rendered template body. The slug is derived from
+/// `title`; duplicates get a numeric suffix.
+pub fn create_note_from_template(
+    vault_root: &Utf8Path,
+    title: &str,
+    body: &str,
+) -> io::Result<CreatedNote> {
+    let title = title.trim();
+    let display_title = if title.is_empty() { "Untitled" } else { title };
+    let slug = slugify(display_title);
+    write_with_dedup(vault_root, &slug, body)
+}
+
+/// Write the historical content of a note into `history/<stem>-<sha>.md`,
+/// avoiding overwrites. Returns the created file so the caller can open it.
+pub fn restore_note(
+    vault_root: &Utf8Path,
+    original_rel: &str,
+    sha: &str,
+    content: &str,
+) -> io::Result<CreatedNote> {
+    let stem = std::path::Path::new(original_rel)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("note");
+    let history_dir = vault_root.join("history");
+    std::fs::create_dir_all(history_dir.as_std_path())?;
+    let slug = format!("{stem}-{sha}");
+    write_with_dedup(&history_dir, &slug, content)
+}
+
+fn write_with_dedup(vault_root: &Utf8Path, slug: &str, body: &str) -> io::Result<CreatedNote> {
     let mut path = vault_root.join(format!("{slug}.md"));
     let mut suffix = 1;
     while path.exists() {
         suffix += 1;
         path = vault_root.join(format!("{slug}-{suffix}.md"));
     }
-
-    let now = Timestamp::now().strftime("%Y-%m-%d").to_string();
-    let title_yaml = yaml_scalar(display_title);
-    let body = format!(
-        "---\ntitle: {title_yaml}\ncreated: {now}\ntags: []\n---\n\n# {display_title}\n\n",
-    );
     std::fs::write(path.as_std_path(), body)?;
-
     let relative = path
         .strip_prefix(vault_root)
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|_| path.clone());
-    Ok(CreatedNote {
-        absolute_path: path,
-        relative_path: relative,
-    })
+    Ok(CreatedNote { absolute_path: path, relative_path: relative })
 }
 
 fn yaml_scalar(s: &str) -> String {

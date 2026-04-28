@@ -6,5 +6,6 @@ mod permission_modal;
 mod settings_panel;
 mod sidebar;
 mod slash_palette;
+pub mod table;
 
 pub use app::App;

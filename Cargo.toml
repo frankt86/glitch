@@ -25,6 +25,8 @@ futures = "0.3"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
+similar = "2"
 
 # Errors + logging
 thiserror = "1"
@@ -48,6 +50,9 @@ htmd = "0.2"
 # Dates / IDs
 jiff = { version = "0.1", features = ["serde"] }
 ulid = { version = "1", features = ["serde"] }
+
+# Scripting
+rhai = "1"
 
 # UI
 dioxus = { version = "0.6", features = ["desktop"] }

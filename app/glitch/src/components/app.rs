@@ -50,13 +50,16 @@ pub fn App() -> Element {
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
 
-    // Ensure agent instructions exist on first run.
+    // Ensure agent instructions + note type templates exist on first run.
     use_future({
         let app_settings = app_settings;
         move || async move {
             let path = app_settings.read().agent_instructions_path.clone();
             if let Err(err) = settings::ensure_agent_instructions(&path) {
                 tracing::warn!("failed to seed agent instructions: {err}");
+            }
+            if let Err(err) = settings::ensure_default_types() {
+                tracing::warn!("failed to seed note types: {err}");
             }
         }
     });
@@ -257,10 +260,10 @@ pub fn App() -> Element {
                     state: app_state,
                     on_command: {
                         let mut history = chat_history;
-                        let app_state = app_state;
+                        let mut app_state = app_state;
                         let chat_tx = chat_tx.clone();
                         move |text: String| {
-                            handle_send(text, app_state, &mut history, &chat_tx);
+                            handle_send(text, &mut app_state, &mut history, &chat_tx);
                         }
                     },
                 }
@@ -270,10 +273,10 @@ pub fn App() -> Element {
                     claude_status,
                     on_send: {
                         let mut history = chat_history;
-                        let app_state = app_state;
+                        let mut app_state = app_state;
                         let chat_tx = chat_tx.clone();
                         move |text: String| {
-                            handle_send(text, app_state, &mut history, &chat_tx);
+                            handle_send(text, &mut app_state, &mut history, &chat_tx);
                         }
                     },
                     on_interrupt: move |_| chat_tx.send(ChatCommand::Interrupt),
@@ -304,7 +307,7 @@ fn build_session_config(runtime: &Signal<Option<PermissionRuntime>>) -> SessionC
 
 fn handle_send(
     text: String,
-    app_state: Signal<AppState>,
+    app_state: &mut Signal<AppState>,
     history: &mut Signal<Vec<ChatEntry>>,
     chat_tx: &Coroutine<ChatCommand>,
 ) {
@@ -312,7 +315,7 @@ fn handle_send(
         Some(Ok(cmd)) => {
             let display = format!("/{}", cmd.name());
             history.write().push(ChatEntry::UserPrompt(display.clone()));
-            let ctx = build_context(app_state);
+            let ctx = build_context(*app_state);
             match cmd.dispatch(&ctx) {
                 CommandOutcome::LocalReply(body) => {
                     history.write().push(ChatEntry::LocalReply {
@@ -346,6 +349,33 @@ fn handle_send(
                             }
                         }
                     });
+                }
+                CommandOutcome::LocalCreate { title, note_type, vault_root } => {
+                    let body = settings::render_template(&note_type, &title);
+                    match vault_actions::create_note_from_template(&vault_root, &title, &body) {
+                        Ok(created) => {
+                            let id = glitch_core::NoteId(created.relative_path.clone());
+                            let content = std::fs::read_to_string(&created.absolute_path)
+                                .unwrap_or_default();
+                            let mut s = app_state.write();
+                            s.current_note = Some(id);
+                            s.editor_content = content;
+                            s.editor_dirty = false;
+                            drop(s);
+                            history.write().push(ChatEntry::LocalReply {
+                                command: display,
+                                body: format!(
+                                    "created {} (type: {note_type})",
+                                    created.relative_path
+                                ),
+                            });
+                        }
+                        Err(err) => {
+                            history.write().push(ChatEntry::Error(format!(
+                                "/note failed: {err}"
+                            )));
+                        }
+                    }
                 }
             }
         }

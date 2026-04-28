@@ -39,6 +39,12 @@ pub const COMMANDS: &[CommandHint] = &[
         insertion: "/connect",
     },
     CommandHint {
+        name: "table",
+        args: "",
+        description: "insert an interactive data table into this note",
+        insertion: "/table",
+    },
+    CommandHint {
         name: "help",
         args: "",
         description: "show available commands",

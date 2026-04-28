@@ -6,6 +6,160 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::PathBuf;
 
+// ─── Note types ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NoteTypeConfig {
+    pub name: String,
+    #[serde(default = "default_type_emoji")]
+    pub emoji: String,
+    /// Filename of the template inside `%APPDATA%\Glitch\templates\`.
+    /// If empty or the file doesn't exist, the built-in blank template is used.
+    #[serde(default)]
+    pub template: String,
+}
+
+fn default_type_emoji() -> String {
+    "📄".into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct TypesFile {
+    #[serde(rename = "type", default)]
+    types: Vec<NoteTypeConfig>,
+}
+
+pub fn types_config_path() -> io::Result<PathBuf> {
+    let mut p = appdata_glitch_dir()?;
+    p.push("types.toml");
+    Ok(p)
+}
+
+pub fn templates_dir() -> io::Result<PathBuf> {
+    let mut p = appdata_glitch_dir()?;
+    p.push("templates");
+    Ok(p)
+}
+
+/// Load note types from `%APPDATA%\Glitch\types.toml`.
+/// Returns a default set if the file doesn't exist or can't be parsed.
+pub fn load_types() -> Vec<NoteTypeConfig> {
+    let path = match types_config_path() {
+        Ok(p) => p,
+        Err(_) => return default_note_types(),
+    };
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return default_note_types(),
+    };
+    toml::from_str::<TypesFile>(&contents)
+        .map(|f| f.types)
+        .unwrap_or_else(|_| default_note_types())
+}
+
+fn default_note_types() -> Vec<NoteTypeConfig> {
+    vec![
+        NoteTypeConfig { name: "meeting".into(), emoji: "🗓".into(), template: "meeting.md".into() },
+        NoteTypeConfig { name: "book".into(),    emoji: "📚".into(), template: "book.md".into() },
+        NoteTypeConfig { name: "person".into(),  emoji: "👤".into(), template: "person.md".into() },
+        NoteTypeConfig { name: "project".into(), emoji: "🚀".into(), template: "project.md".into() },
+    ]
+}
+
+/// Render a template for a given type. Replaces `{{title}}`, `{{date}}`,
+/// `{{slug}}` placeholders. Falls back to the blank stub if no template file.
+pub fn render_template(note_type: &str, title: &str) -> String {
+    let slug = slugify_title(title);
+    let today = jiff::Timestamp::now().strftime("%Y-%m-%d").to_string();
+
+    // Try to read from the templates directory first.
+    if let Ok(tmpl_dir) = templates_dir() {
+        let types = load_types();
+        if let Some(cfg) = types.iter().find(|t| t.name.eq_ignore_ascii_case(note_type)) {
+            if !cfg.template.is_empty() {
+                let tmpl_path = tmpl_dir.join(&cfg.template);
+                if let Ok(raw) = std::fs::read_to_string(&tmpl_path) {
+                    return raw
+                        .replace("{{title}}", title)
+                        .replace("{{date}}", &today)
+                        .replace("{{slug}}", &slug)
+                        .replace("{{type}}", note_type);
+                }
+            }
+        }
+    }
+
+    // Fallback: minimal frontmatter stub with the requested type.
+    format!(
+        "---\ntitle: \"{title}\"\ntype: {note_type}\ncreated: {today}\ntags: []\n---\n\n# {title}\n\n"
+    )
+}
+
+fn slugify_title(s: &str) -> String {
+    let mut out = String::new();
+    let mut last_dash = false;
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !out.is_empty() {
+            out.push('-');
+            last_dash = true;
+        }
+    }
+    out.trim_matches('-').to_string()
+}
+
+/// Seed `%APPDATA%\Glitch\types.toml` and default template files if they don't exist.
+pub fn ensure_default_types() -> io::Result<()> {
+    let config_path = types_config_path()?;
+    let tmpl_dir = templates_dir()?;
+    std::fs::create_dir_all(&tmpl_dir)?;
+
+    if !config_path.exists() {
+        let toml_content = r#"# Glitch note types
+# Each [[type]] entry registers a note type with an emoji and template file.
+# Templates live in %APPDATA%\Glitch\templates\ and support placeholders:
+#   {{title}}, {{date}}, {{slug}}, {{type}}
+
+[[type]]
+name = "meeting"
+emoji = "🗓"
+template = "meeting.md"
+
+[[type]]
+name = "book"
+emoji = "📚"
+template = "book.md"
+
+[[type]]
+name = "person"
+emoji = "👤"
+template = "person.md"
+
+[[type]]
+name = "project"
+emoji = "🚀"
+template = "project.md"
+"#;
+        std::fs::write(&config_path, toml_content)?;
+    }
+
+    let templates: &[(&str, &str)] = &[
+        ("meeting.md", "---\ntitle: \"{{title}}\"\ntype: meeting\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Date:** {{date}}  \n**Attendees:**  \n\n## Agenda\n\n## Notes\n\n## Action items\n\n- [ ] \n"),
+        ("book.md",    "---\ntitle: \"{{title}}\"\ntype: book\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Author:**  \n**Started:** {{date}}  \n**Finished:**  \n\n## Summary\n\n## Key ideas\n\n## Quotes\n\n## My take\n\n"),
+        ("person.md",  "---\ntitle: \"{{title}}\"\ntype: person\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Role:**  \n**Contact:**  \n\n## Notes\n\n## Meetings\n\n"),
+        ("project.md", "---\ntitle: \"{{title}}\"\ntype: project\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Status:** active  \n**Started:** {{date}}  \n\n## Goal\n\n## Tasks\n\n- [ ] \n\n## Notes\n\n"),
+    ];
+    for (filename, content) in templates {
+        let path = tmpl_dir.join(filename);
+        if !path.exists() {
+            std::fs::write(&path, content)?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     /// Path to the `claude` CLI. Use just `"claude"` to resolve from PATH.

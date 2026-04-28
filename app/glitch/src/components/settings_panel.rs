@@ -1,4 +1,4 @@
-use crate::settings::{self, AppSettings};
+use crate::settings::{self, AppSettings, NoteTypeConfig};
 use dioxus::prelude::*;
 
 #[component]
@@ -125,16 +125,7 @@ pub fn SettingsPanel(
                             }
                         }
                     }
-                    Section { title: "Note types",
-                        Field { label: "Type registry",
-                            div { class: "settings-readonly",
-                                "Built-in types: meeting 🗓 · person 👤 · book 📚 · project 🚧 · article 📰 · idea 💡 · todo ✅ · log 📋 · code 💻 · place 📍 · event 🎉 · question ❓"
-                            }
-                            div { class: "settings-hint",
-                                "Customisable types + templates land in M2.75-tail (next iteration) at `%APPDATA%\\Glitch\\types.toml` and `templates\\<type>.md`."
-                            }
-                        }
-                    }
+                    NoteTypesSection {}
                     Section { title: "About",
                         Field { label: "Version",
                             div { class: "settings-readonly", "Glitch v{env!(\"CARGO_PKG_VERSION\")} · pure-Rust AI-native vault" }
@@ -148,6 +139,57 @@ pub fn SettingsPanel(
                     button { class: "btn", onclick: close, "Cancel" }
                     button { class: "btn btn-primary", onclick: save_and_close, "Save" }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn NoteTypesSection() -> Element {
+    let types = settings::load_types();
+    let types_path = settings::types_config_path()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "(unknown)".into());
+    let tmpl_dir = settings::templates_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "(unknown)".into());
+
+    rsx! {
+        section { class: "settings-section",
+            h3 { class: "settings-section-title", "Note types" }
+            div { class: "settings-field",
+                label { class: "settings-label", "Registered types" }
+                div { class: "settings-control",
+                    div { class: "note-types-list",
+                        for t in types {
+                            NoteTypeRow { cfg: t }
+                        }
+                    }
+                    div { class: "settings-hint",
+                        "Edit "
+                        span { class: "mono", "{types_path}" }
+                        " to add or rename types. Templates live in "
+                        span { class: "mono", "{tmpl_dir}" }
+                        ". Use "
+                        span { class: "mono", "/note <title> --type <name>" }
+                        " to create from a template."
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn NoteTypeRow(cfg: NoteTypeConfig) -> Element {
+    rsx! {
+        div { class: "note-type-row",
+            span { class: "note-type-emoji", "{cfg.emoji}" }
+            span { class: "note-type-name", "{cfg.name}" }
+            if !cfg.template.is_empty() {
+                span { class: "note-type-template", "{cfg.template}" }
             }
         }
     }

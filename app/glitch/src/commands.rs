@@ -9,7 +9,7 @@ use camino::Utf8PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub enum SlashCommand {
     Help,
-    NewNote { title: String },
+    NewNote { title: String, note_type: Option<String> },
     Explain,
     Extract { url: String },
     Connect,
@@ -27,10 +27,15 @@ pub enum CommandOutcome {
     LocalReply(String),
     Prompt(String),
     Error(String),
-    /// Fetch and save an article into the vault. Handled in-process by Glitch
-    /// (via `reqwest`), not via a Claude tool call.
+    /// Fetch and save an article into the vault.
     Extract {
         url: String,
+        vault_root: camino::Utf8PathBuf,
+    },
+    /// Create a note from a local template (no AI involved).
+    LocalCreate {
+        title: String,
+        note_type: String,
         vault_root: camino::Utf8PathBuf,
     },
 }
@@ -50,11 +55,14 @@ impl SlashCommand {
             "help" | "h" | "?" => Ok(SlashCommand::Help),
             "note" | "n" | "new" => {
                 if args.is_empty() {
-                    Err("usage: /note <title>".into())
+                    Err("usage: /note <title> [--type <type>]".into())
                 } else {
-                    Ok(SlashCommand::NewNote {
-                        title: args.to_string(),
-                    })
+                    let (title, note_type) = parse_note_args(args);
+                    if title.is_empty() {
+                        Err("usage: /note <title> [--type <type>]".into())
+                    } else {
+                        Ok(SlashCommand::NewNote { title, note_type })
+                    }
                 }
             }
             "explain" | "e" => Ok(SlashCommand::Explain),
@@ -87,11 +95,21 @@ impl SlashCommand {
     pub fn dispatch(self, ctx: &CommandContext) -> CommandOutcome {
         match self {
             SlashCommand::Help => CommandOutcome::LocalReply(HELP_TEXT.into()),
-            SlashCommand::NewNote { title } => {
+            SlashCommand::NewNote { title, note_type } => {
                 let Some(root) = ctx.vault_root.as_ref() else {
                     return CommandOutcome::Error("open a vault first".into());
                 };
-                CommandOutcome::Prompt(new_note_prompt(root, &title))
+                if let Some(t) = note_type {
+                    // Local template path — no AI involved.
+                    CommandOutcome::LocalCreate {
+                        title,
+                        note_type: t,
+                        vault_root: root.clone(),
+                    }
+                } else {
+                    // No type specified: let Claude create the note with its own content.
+                    CommandOutcome::Prompt(new_note_prompt(root, &title))
+                }
             }
             SlashCommand::Explain => match (&ctx.current_note_relative, &ctx.current_note_content) {
                 (Some(path), Some(body)) => CommandOutcome::Prompt(explain_prompt(path, body)),
@@ -119,6 +137,24 @@ impl SlashCommand {
     }
 }
 
+/// Parse `/note <title> [--type <name>]` args string into `(title, note_type)`.
+fn parse_note_args(args: &str) -> (String, Option<String>) {
+    // Look for --type flag anywhere in the string.
+    if let Some(pos) = args.find("--type") {
+        let before = args[..pos].trim().to_string();
+        let after = args[pos + 6..].trim(); // skip "--type"
+        let type_name = after
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let note_type = if type_name.is_empty() { None } else { Some(type_name) };
+        (before, note_type)
+    } else {
+        (args.trim().to_string(), None)
+    }
+}
+
 /// Try to parse `input` as a slash command. `None` means free-form chat.
 pub fn try_parse(input: &str) -> Option<Result<SlashCommand, String>> {
     let trimmed = input.trim_start();
@@ -127,11 +163,13 @@ pub fn try_parse(input: &str) -> Option<Result<SlashCommand, String>> {
 }
 
 const HELP_TEXT: &str = "Slash commands:
-  /note <title>     ask Claude to create a new note in the vault root
-  /extract <url>    fetch an article and save it as a note (runs in Glitch; no AI)
-  /explain          summarise the currently open note
-  /connect          find related notes for the current note (placeholder)
-  /help             this message
+  /note <title>               ask Claude to create a new note in the vault root
+  /note <title> --type <type> create a note from a local template (no AI)
+                              types: meeting, book, person, project (or custom)
+  /extract <url>              fetch an article and save it as a note (no AI)
+  /explain                    summarise the currently open note
+  /connect                    find related notes for the current note
+  /help                       this message
 
 Anything not starting with `/` is sent to Claude as free-form chat.";
 
@@ -247,15 +285,23 @@ mod tests {
     fn parses_note_with_title() {
         assert_eq!(
             SlashCommand::parse("note On Glitches").unwrap(),
-            SlashCommand::NewNote {
-                title: "On Glitches".into()
-            }
+            SlashCommand::NewNote { title: "On Glitches".into(), note_type: None }
         );
         assert_eq!(
             SlashCommand::parse("n   spaced  title").unwrap(),
-            SlashCommand::NewNote {
-                title: "spaced  title".into()
-            }
+            SlashCommand::NewNote { title: "spaced  title".into(), note_type: None }
+        );
+    }
+
+    #[test]
+    fn parses_note_with_type() {
+        assert_eq!(
+            SlashCommand::parse("note My Meeting --type meeting").unwrap(),
+            SlashCommand::NewNote { title: "My Meeting".into(), note_type: Some("meeting".into()) }
+        );
+        assert_eq!(
+            SlashCommand::parse("note Reading Notes --type Book").unwrap(),
+            SlashCommand::NewNote { title: "Reading Notes".into(), note_type: Some("book".into()) }
         );
     }
 

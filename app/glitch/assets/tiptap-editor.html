@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body { margin: 0; padding: 0; height: 100%; background: #0f1117; color: #e6e8ec; font-family: "Segoe UI", system-ui, -apple-system, sans-serif; font-size: 14px; }
+
+    #editor-root { height: 100%; overflow-y: auto; padding: 14px 18px; }
+
+    .ProseMirror { outline: none; line-height: 1.6; min-height: calc(100vh - 28px); }
+    .ProseMirror h1 { font-size: 22px; margin: 0 0 12px; font-weight: 600; }
+    .ProseMirror h2 { font-size: 18px; margin: 18px 0 10px; font-weight: 600; }
+    .ProseMirror h3 { font-size: 16px; margin: 16px 0 8px; font-weight: 600; }
+    .ProseMirror p  { margin: 0 0 12px; }
+    .ProseMirror p:last-child { margin-bottom: 0; }
+    .ProseMirror code { background: #1c2030; padding: 1px 5px; border-radius: 3px; font-family: "Cascadia Mono","Consolas","JetBrains Mono",ui-monospace,monospace; font-size: 12px; }
+    .ProseMirror pre { background: #1c2030; padding: 12px; border-radius: 4px; overflow-x: auto; margin: 0 0 12px; }
+    .ProseMirror pre code { background: transparent; padding: 0; }
+    .ProseMirror blockquote { border-left: 3px solid #7aa2f7; margin: 0 0 12px; padding: 4px 12px; color: #8a8f9d; }
+    .ProseMirror a { color: #7aa2f7; }
+    .ProseMirror ul, .ProseMirror ol { padding-left: 24px; margin: 0 0 12px; }
+    .ProseMirror li { margin: 2px 0; }
+    .ProseMirror hr { border: none; border-top: 1px solid #262a36; margin: 16px 0; }
+    .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #8a8f9d; pointer-events: none; float: left; height: 0; }
+
+    /* ── Glitch table NodeView ── */
+    .glitch-table-node {
+      margin: 0 0 12px;
+      border: 1px solid #262a36;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #161922;
+      user-select: none;
+    }
+    .glitch-table-node.ProseMirror-selectednode { outline: 2px solid #7aa2f7; }
+
+    .gtable { border-collapse: collapse; width: 100%; font-size: 13px; }
+
+    /* header */
+    .gtable thead { background: #1c2030; }
+    .gtable th {
+      padding: 0; text-align: left; font-weight: 600; color: #8a8f9d;
+      border-right: 1px solid #262a36; border-bottom: 1px solid #262a36;
+      white-space: nowrap; position: relative;
+    }
+    .gtable th:last-child { border-right: none; }
+
+    .gtable-th-inner { display: flex; align-items: center; gap: 4px; padding: 6px 10px; }
+    .gtable-type-tag { font-size: 10px; color: #4a5068; font-weight: 400; background: #0f1117; border-radius: 3px; padding: 1px 4px; }
+    .gtable-th-del {
+      opacity: 0; cursor: pointer; background: none; border: none; color: #f7768e;
+      font-size: 14px; line-height: 1; padding: 0 2px; margin-left: auto;
+    }
+    .gtable th:hover .gtable-th-del { opacity: 1; }
+
+    /* add-column form embedded in header */
+    .gtable-addcol-form { display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
+    .gtable-addcol-input {
+      background: #0f1117; border: 1px solid #7aa2f7; border-radius: 3px;
+      color: #e6e8ec; font-size: 12px; padding: 3px 6px; outline: none; width: 100px;
+    }
+    .gtable-addcol-select {
+      background: #0f1117; border: 1px solid #262a36; border-radius: 3px;
+      color: #e6e8ec; font-size: 12px; padding: 3px 4px; outline: none; cursor: pointer;
+    }
+    .gtable-addcol-ok {
+      background: #7aa2f7; color: #0f1117; border: none; border-radius: 3px;
+      font-size: 12px; padding: 3px 8px; cursor: pointer; font-weight: 600;
+    }
+    .gtable-addcol-cancel {
+      background: none; border: 1px solid #262a36; color: #8a8f9d; border-radius: 3px;
+      font-size: 12px; padding: 3px 6px; cursor: pointer;
+    }
+    .gtable-add-col-btn {
+      background: none; border: none; color: #8a8f9d; font-size: 12px;
+      cursor: pointer; padding: 6px 10px; white-space: nowrap; font-family: inherit;
+    }
+    .gtable-add-col-btn:hover { color: #7aa2f7; }
+
+    /* cells */
+    .gtable td {
+      padding: 0; border-right: 1px solid #1c2030; border-bottom: 1px solid #1c2030;
+    }
+    .gtable td:last-child { border-right: none; }
+    .gtable tbody tr:last-child td { border-bottom: none; }
+
+    .gtable-cell-input {
+      width: 100%; background: transparent; border: none; outline: none;
+      color: #e6e8ec; font-size: 13px; font-family: inherit; padding: 6px 10px;
+      display: block;
+    }
+    .gtable-cell-input:focus { background: rgba(122,162,247,0.06); }
+    .gtable-checkbox-cell { display: flex; align-items: center; justify-content: center; padding: 6px; }
+    .gtable-formula-cell { padding: 6px 10px; color: #8a8f9d; font-style: italic; font-size: 12px; }
+
+    /* row delete */
+    .gtable-row-del {
+      opacity: 0; cursor: pointer; background: none; border: none;
+      color: #f7768e; font-size: 13px; padding: 6px 8px; display: block; width: 100%;
+    }
+    .gtable tbody tr:hover .gtable-row-del { opacity: 0.6; }
+    .gtable tbody tr:hover .gtable-row-del:hover { opacity: 1; }
+
+    /* add-row button */
+    .gtable-add-row-btn {
+      width: 100%; background: none; border: none; color: #8a8f9d;
+      font-size: 12px; padding: 6px 10px; text-align: left; cursor: pointer; font-family: inherit;
+    }
+    .gtable-add-row-btn:hover { color: #7aa2f7; background: rgba(122,162,247,0.06); }
+
+    #loading { display: flex; align-items: center; justify-content: center; height: 100%; color: #8a8f9d; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading editor…</div>
+  <div id="editor-root" style="display:none"></div>
+
+  <script type="module">
+    import { Editor } from 'https://esm.sh/@tiptap/core@2';
+    import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
+    import CodeBlock from 'https://esm.sh/@tiptap/extension-code-block@2';
+    import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
+    import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+
+    const COL_TYPES = ['text', 'number', 'date', 'checkbox', 'select', 'formula'];
+
+    // -------------------------------------------------------------------------
+    // buildTableNodeView — interactive table inside a codeBlock NodeView
+    // -------------------------------------------------------------------------
+    function buildTableNodeView(node, editor, getPos) {
+      const dom = document.createElement('div');
+      dom.className = 'glitch-table-node';
+
+      // Prevent ProseMirror from handling events that originate inside the table.
+      for (const ev of ['keydown', 'keyup', 'keypress', 'mousedown', 'click', 'input']) {
+        dom.addEventListener(ev, e => e.stopPropagation());
+      }
+
+      let currentJson = node.textContent.trim();
+      let addingColumn = false; // tracks inline add-column form visibility
+
+      function getData() {
+        try { return JSON.parse(currentJson); }
+        catch { return { schema: { columns: [] }, rows: [] }; }
+      }
+
+      function commitData(data) {
+        const json = JSON.stringify(data, null, 2);
+        currentJson = json;
+        addingColumn = false;
+        const pos = typeof getPos === 'function' ? getPos() : undefined;
+        if (pos == null) return;
+        const nodeAtPos = editor.state.doc.nodeAt(pos);
+        if (!nodeAtPos) return;
+        const { tr, schema } = editor.state;
+        editor.view.dispatch(
+          tr.replaceWith(pos + 1, pos + nodeAtPos.nodeSize - 1,
+            json ? [schema.text(json)] : [])
+        );
+      }
+
+      function render() {
+        const data = getData();
+        dom.innerHTML = '';
+
+        const table = document.createElement('table');
+        table.className = 'gtable';
+
+        // ── thead ──────────────────────────────────────────────────────────
+        const thead = document.createElement('thead');
+        const hrow = document.createElement('tr');
+
+        data.schema.columns.forEach((col, ci) => {
+          const th = document.createElement('th');
+          const inner = document.createElement('div');
+          inner.className = 'gtable-th-inner';
+
+          const label = document.createElement('span');
+          label.textContent = col.name;
+          inner.appendChild(label);
+
+          const tag = document.createElement('span');
+          tag.className = 'gtable-type-tag';
+          tag.textContent = col.type || 'text';
+          inner.appendChild(tag);
+
+          const del = document.createElement('button');
+          del.className = 'gtable-th-del';
+          del.textContent = '×';
+          del.title = 'Delete column';
+          del.onclick = () => {
+            const d = getData();
+            d.schema.columns.splice(ci, 1);
+            d.rows.forEach(r => r.splice(ci, 1));
+            commitData(d);
+          };
+          inner.appendChild(del);
+          th.appendChild(inner);
+          hrow.appendChild(th);
+        });
+
+        // "+ Column" cell — shows either a button or an inline form
+        const thAdd = document.createElement('th');
+        if (!addingColumn) {
+          const btn = document.createElement('button');
+          btn.className = 'gtable-add-col-btn';
+          btn.textContent = '+ Column';
+          btn.onclick = () => { addingColumn = true; render(); };
+          thAdd.appendChild(btn);
+        } else {
+          const form = document.createElement('div');
+          form.className = 'gtable-addcol-form';
+
+          const nameInput = document.createElement('input');
+          nameInput.className = 'gtable-addcol-input';
+          nameInput.type = 'text';
+          nameInput.placeholder = 'Name…';
+          // Auto-focus without going through ProseMirror
+          requestAnimationFrame(() => nameInput.focus());
+
+          const typeSelect = document.createElement('select');
+          typeSelect.className = 'gtable-addcol-select';
+          COL_TYPES.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t;
+            opt.textContent = t;
+            typeSelect.appendChild(opt);
+          });
+
+          const okBtn = document.createElement('button');
+          okBtn.className = 'gtable-addcol-ok';
+          okBtn.textContent = 'Add';
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.className = 'gtable-addcol-cancel';
+          cancelBtn.textContent = '×';
+
+          const doAdd = () => {
+            const name = nameInput.value.trim();
+            if (!name) { nameInput.focus(); return; }
+            const d = getData();
+            d.schema.columns.push({ name, type: typeSelect.value });
+            d.rows.forEach(r => r.push(null));
+            commitData(d); // resets addingColumn and re-renders
+          };
+
+          nameInput.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+            if (e.key === 'Escape') { addingColumn = false; render(); }
+          };
+          okBtn.onclick = doAdd;
+          cancelBtn.onclick = () => { addingColumn = false; render(); };
+
+          form.appendChild(nameInput);
+          form.appendChild(typeSelect);
+          form.appendChild(okBtn);
+          form.appendChild(cancelBtn);
+          thAdd.appendChild(form);
+        }
+        hrow.appendChild(thAdd);
+        thead.appendChild(hrow);
+        table.appendChild(thead);
+
+        // ── tbody ──────────────────────────────────────────────────────────
+        const tbody = document.createElement('tbody');
+
+        data.rows.forEach((row, ri) => {
+          const tr = document.createElement('tr');
+
+          data.schema.columns.forEach((col, ci) => {
+            const td = document.createElement('td');
+            const colType = col.type || 'text';
+            const val = row[ci];
+
+            if (colType === 'checkbox') {
+              const wrap = document.createElement('div');
+              wrap.className = 'gtable-checkbox-cell';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.checked = val === true || val === 'true';
+              cb.onchange = () => {
+                const d = getData(); d.rows[ri][ci] = cb.checked; commitData(d);
+              };
+              wrap.appendChild(cb);
+              td.appendChild(wrap);
+
+            } else if (colType === 'formula') {
+              const span = document.createElement('span');
+              span.className = 'gtable-formula-cell';
+              span.textContent = (val != null && val !== '')
+                ? String(val) : (col.expr ? `=${col.expr}` : '');
+              td.appendChild(span);
+
+            } else {
+              const inp = document.createElement('input');
+              inp.className = 'gtable-cell-input';
+              inp.type = colType === 'number' ? 'number' : colType === 'date' ? 'date' : 'text';
+              inp.value = val != null ? String(val) : '';
+              inp.onchange = () => {
+                const d = getData();
+                const v = inp.value;
+                d.rows[ri][ci] = colType === 'number' ? (v === '' ? null : Number(v)) : v;
+                commitData(d);
+              };
+              td.appendChild(inp);
+            }
+            tr.appendChild(td);
+          });
+
+          // Row delete button
+          const tdDel = document.createElement('td');
+          const rowDel = document.createElement('button');
+          rowDel.className = 'gtable-row-del';
+          rowDel.textContent = '×';
+          rowDel.onclick = () => {
+            const d = getData(); d.rows.splice(ri, 1); commitData(d);
+          };
+          tdDel.appendChild(rowDel);
+          tr.appendChild(tdDel);
+          tbody.appendChild(tr);
+        });
+
+        // "+ Row" button row
+        const addTr = document.createElement('tr');
+        const addTd = document.createElement('td');
+        addTd.colSpan = data.schema.columns.length + 1;
+        const addRowBtn = document.createElement('button');
+        addRowBtn.className = 'gtable-add-row-btn';
+        addRowBtn.textContent = '+ Row';
+        addRowBtn.onclick = () => {
+          const d = getData();
+          d.rows.push(d.schema.columns.map(() => null));
+          commitData(d);
+        };
+        addTd.appendChild(addRowBtn);
+        addTr.appendChild(addTd);
+        tbody.appendChild(addTr);
+
+        table.appendChild(tbody);
+        dom.appendChild(table);
+      }
+
+      render();
+
+      return {
+        dom,
+        stopEvent: () => true,
+        update(updatedNode) {
+          if (updatedNode.type.name !== 'codeBlock') return false;
+          if (updatedNode.attrs.language !== 'glitch-table') return false;
+          const newJson = updatedNode.textContent.trim();
+          if (newJson !== currentJson) { currentJson = newJson; render(); }
+          return true;
+        },
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // GlitchCodeBlock — extends CodeBlock with the inline table NodeView
+    // -------------------------------------------------------------------------
+    const GlitchCodeBlock = CodeBlock.extend({
+      addNodeView() {
+        return ({ node, editor, getPos }) => {
+          if (node.attrs.language === 'glitch-table') {
+            return buildTableNodeView(node, editor, getPos);
+          }
+          // Default rendering for all other code blocks
+          const pre = document.createElement('pre');
+          pre.style.cssText = 'background:#1c2030;padding:12px;border-radius:4px;overflow-x:auto;margin:0 0 12px';
+          const code = document.createElement('code');
+          if (node.attrs.language) code.classList.add(`language-${node.attrs.language}`);
+          pre.appendChild(code);
+          return { dom: pre, contentDOM: code };
+        };
+      },
+    });
+
+    // -------------------------------------------------------------------------
+    // Editor
+    // -------------------------------------------------------------------------
+    const params = new URLSearchParams(location.search);
+    const placeholder = 'Write here… or type / for commands';
+
+    let suppressUpdate = false;
+
+    const editor = new Editor({
+      element: document.getElementById('editor-root'),
+      extensions: [
+        StarterKit.configure({ codeBlock: false }),
+        GlitchCodeBlock,
+        Placeholder.configure({ placeholder }),
+        Markdown.configure({
+          html: false,
+          transformCopiedText: true,
+          transformPastedText: true,
+        }),
+      ],
+      content: '',
+      onUpdate({ editor }) {
+        if (suppressUpdate) return;
+        const md = editor.storage.markdown.getMarkdown();
+        window.parent.postMessage({ type: 'content-changed', content: md }, '*');
+
+        const { from, to } = editor.state.selection;
+        if (from === to) {
+          const $from = editor.state.doc.resolve(from);
+          const lineText = editor.state.doc.textBetween($from.start(), from, '\n', '');
+          const match = lineText.match(/^\/(\w*)$/);
+          window.parent.postMessage({ type: 'slash-changed', query: match ? match[1] : null }, '*');
+        }
+      },
+      onSelectionUpdate({ editor }) {
+        const { from, to } = editor.state.selection;
+        const $from = editor.state.doc.resolve(from);
+        const lineText = editor.state.doc.textBetween($from.start(), from, '\n', '');
+        if (!lineText.match(/^\/\w*$/)) {
+          window.parent.postMessage({ type: 'slash-changed', query: null }, '*');
+        }
+      },
+    });
+
+    window.addEventListener('message', (event) => {
+      const d = event.data;
+      if (!d || typeof d !== 'object') return;
+
+      if (d.type === 'set-content') {
+        suppressUpdate = true;
+        editor.commands.setContent(d.content || '', false);
+        suppressUpdate = false;
+
+      } else if (d.type === 'clear-slash') {
+        const { from } = editor.state.selection;
+        const $from = editor.state.doc.resolve(from);
+        const lineStart = $from.start();
+        if (from > lineStart) editor.commands.deleteRange({ from: lineStart, to: from });
+
+      } else if (d.type === 'insert-table') {
+        const defaultJson = JSON.stringify(
+          { schema: { columns: [{ name: 'Name', type: 'text' }] }, rows: [] }, null, 2
+        );
+        // Insert the glitch-table code block
+        editor.chain().focus().insertContent({
+          type: 'codeBlock',
+          attrs: { language: 'glitch-table' },
+          content: [{ type: 'text', text: defaultJson }],
+        }).run();
+        // Exit the code block so cursor lands in a paragraph after the table.
+        // createParagraphNear() inserts an empty paragraph next to the selection.
+        if (editor.isActive('codeBlock')) {
+          editor.commands.createParagraphNear();
+        }
+      }
+    });
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('editor-root').style.display = 'block';
+
+    if (window.__glitchPendingContent !== undefined) {
+      suppressUpdate = true;
+      editor.commands.setContent(window.__glitchPendingContent, false);
+      suppressUpdate = false;
+      delete window.__glitchPendingContent;
+    }
+
+    window.__glitchEditor = editor;
+    window.parent.postMessage({ type: 'tiptap-ready' }, '*');
+  </script>
+</body>
+</html>

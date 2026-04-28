@@ -18,4 +18,5 @@ camino.workspace = true
 pulldown-cmark.workspace = true
 serde_yaml.workspace = true
 jiff.workspace = true
+rhai.workspace = true
 walkdir = "2.5"

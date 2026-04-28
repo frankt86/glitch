@@ -191,6 +191,64 @@ fn parse_porcelain(out: &str) -> SyncStatus {
     }
 }
 
+// ─── Per-file history ───────────────────────────────────────────────────────
+
+/// A single commit in a file's git history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitInfo {
+    /// Short SHA (7 chars).
+    pub sha: String,
+    pub author: String,
+    /// Short date (YYYY-MM-DD).
+    pub date: String,
+    /// First line of the commit message.
+    pub message: String,
+}
+
+/// Return the commits that touched `rel_path` (relative to `vault_root`).
+/// Returns an empty vec — not an error — when the file has no history or the
+/// vault is not a git repository.
+pub async fn file_history(
+    vault_root: &Utf8Path,
+    rel_path: &str,
+) -> Result<Vec<CommitInfo>, SyncError> {
+    // \x1f = ASCII Unit Separator — safe delimiter inside git format strings.
+    let fmt = "--format=%h\x1f%an\x1f%cs\x1f%s";
+    let git_path = rel_path.replace('\\', "/");
+    let out = match run_git(vault_root, &["log", "--follow", fmt, "--", &git_path]).await {
+        Ok(o) => o,
+        // Not a git repo or git isn't installed → treat as no history.
+        Err(SyncError::GitNotInstalled) | Err(SyncError::GitFailed { .. }) => return Ok(vec![]),
+        Err(e) => return Err(e),
+    };
+    Ok(parse_history_log(&out))
+}
+
+fn parse_history_log(out: &str) -> Vec<CommitInfo> {
+    out.lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, '\x1f');
+            Some(CommitInfo {
+                sha: parts.next()?.to_string(),
+                author: parts.next()?.to_string(),
+                date: parts.next()?.to_string(),
+                message: parts.next().unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
+/// Return the raw content of `rel_path` as it existed at commit `sha`.
+pub async fn file_at_rev(
+    vault_root: &Utf8Path,
+    rel_path: &str,
+    sha: &str,
+) -> Result<String, SyncError> {
+    let git_path = rel_path.replace('\\', "/");
+    run_git(vault_root, &["show", &format!("{sha}:{git_path}")]).await
+}
+
 /// Auto-generated commit message: "notes: update N files (a.md, b.md, …)".
 pub fn auto_commit_message(status: &SyncStatus) -> String {
     let n = status.dirty_files.len();

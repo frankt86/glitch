@@ -16,8 +16,10 @@ mod watch;
 use components::App;
 use dioxus::desktop::{Config, WindowBuilder};
 use dioxus::prelude::*;
+use std::borrow::Cow;
 
 const STYLES: &str = include_str!("../assets/styles.css");
+const TIPTAP_HTML: &[u8] = include_bytes!("../assets/tiptap-editor.html");
 
 fn main() {
     // When Claude Code re-invokes us as the MCP permission server, divert
@@ -62,8 +64,16 @@ fn main() {
         .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 800.0));
 
     LaunchBuilder::desktop()
-        .with_cfg(Config::new().with_window(window).with_custom_head(format!(
-            "<style>{STYLES}</style>"
-        )))
+        .with_cfg(
+            Config::new()
+                .with_window(window)
+                .with_custom_head(format!("<style>{STYLES}</style>"))
+                .with_custom_protocol("glitch-editor", |_req| {
+                    dioxus::desktop::wry::http::Response::builder()
+                        .header("Content-Type", "text/html; charset=utf-8")
+                        .body(Cow::Borrowed(TIPTAP_HTML))
+                        .unwrap()
+                }),
+        )
         .launch(App);
 }
