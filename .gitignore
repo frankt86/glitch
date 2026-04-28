@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+/.vscode
+/.idea
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Dioxus build artifacts
+/dist
+/.dioxus

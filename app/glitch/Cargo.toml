@@ -1,0 +1,36 @@
+[package]
+name = "glitch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "glitch"
+path = "src/main.rs"
+
+[dependencies]
+glitch-core.workspace = true
+glitch-ai.workspace = true
+glitch-sync.workspace = true
+glitch-mcp.workspace = true
+ulid.workspace = true
+
+dioxus.workspace = true
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+camino.workspace = true
+rfd.workspace = true
+pulldown-cmark.workspace = true
+notify.workspace = true
+reqwest.workspace = true
+dom_smoothie.workspace = true
+htmd.workspace = true
+jiff.workspace = true
