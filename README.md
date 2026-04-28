@@ -4,19 +4,7 @@ Pure-Rust AI-native markdown knowledge base. Named for [the keytool from ReBoot]
 
 ## Status
 
-Active development. Core editing, tables, git sync, slash commands, and git history are working.
-
-## Features
-
-- **WYSIWYG editor** — TipTap (ProseMirror) embedded in WebView2; tables render inline in the document like Notion, not in a separate pane
-- **Glitch tables** — sortable/filterable typed data tables (text, number, date, checkbox, select, formula) embedded as ` ```glitch-table ``` ` fenced blocks in plain markdown; add columns via dropdown, add/delete rows inline
-- **AI chat** — streams from the [Claude Code CLI](https://docs.claude.com/claude-code) in `--output-format stream-json` mode; full agent loop with tool-use cards, thinking blocks, and interrupt support
-- **Slash commands** — `/note`, `/explain`, `/extract`, `/connect`, `/table`, `/help` available in both the editor and the chat input
-- **GitHub sync** — auto-commit, push/pull, conflict surface via the system `git` CLI
-- **Git history** — per-note commit list with inline side-by-side diff and read-only restore
-- **Collapsible vault sidebar** — folder tree with frontmatter icons and note types
-- **Source view** — raw markdown textarea toggle alongside the WYSIWYG editor
-- **Note types & templates** — type registry in `%APPDATA%\Glitch\types.toml` with `{{title}}` / `{{date}}` placeholders
+Pre-alpha.
 
 ## Architecture
 
