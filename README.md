@@ -4,7 +4,7 @@ Pure-Rust AI-native markdown knowledge base. Named for [the keytool from ReBoot]
 
 ## Status
 
-Pre-alpha. M1 in progress: vault loader + Dioxus shell + Claude Code streaming chat.
+Pre-alpha.
 
 ## Architecture
 
