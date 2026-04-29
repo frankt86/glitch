@@ -63,6 +63,18 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 ```
 ````
 
+## Features
+
+- **WYSIWYG markdown editor** powered by TipTap v2 — headings, bold, italic, strike, code, blockquote, lists, dividers
+- **Slash commands** — type `/` anywhere in the editor or chat to get an autocomplete palette; formatting commands apply instantly, action commands (note, extract, explain, connect) go to the AI
+- **Inline data tables** — `glitch-table` fenced blocks render as interactive grids with sortable columns, typed cells (text, number, date, checkbox, select, formula), and inline add/delete; gap-cursor lets you click above or below a table to place the cursor there
+- **Streaming AI chat** — Claude Code CLI runs as a subprocess in `stream-json` mode; tool-use blocks surface as expandable cards; the AI always sees which note is open
+- **Frontmatter detail tab** — structured fields per note type (article, meeting, book, person, project); editable title pinned above the editor
+- **Note types & templates** — register types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
+- **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
+- **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface
+- **CI/CD** — GitHub Actions builds and uploads `glitch.exe` on every push to `main`; attaches the binary to GitHub Releases automatically
+
 ## Roadmap
 
 - [x] M1 — Vault loader, Dioxus shell, Claude streaming chat
@@ -71,7 +83,7 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - [x] M2.75 — Note types, templates, tool approval modal
 - [x] M2.8 — Per-note git history with diff view
 - [x] M2.85 — Universal slash-command palette (editor + chat)
-- [x] M3 — TipTap WYSIWYG editor with inline glitch-table NodeViews
+- [x] M3 — TipTap WYSIWYG editor with markdown formatting commands and gap-cursor table navigation
 - [x] M4 — Interactive table grid (sort, filter, typed columns, formulas)
 - [ ] M5 — Embeddings + AI-suggested connections (`fastembed`)
 - [ ] M6 — Graph view (petgraph + fdg, typed edges)
