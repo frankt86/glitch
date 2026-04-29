@@ -163,35 +163,47 @@ pub fn App() -> Element {
         }
     };
 
-    // Sidebar "+ New" button → create a blank note, select it, focus the editor.
+    // Sidebar "+ New" button → create a note (with optional type/template).
     let create_new_note = {
         let mut app_state = app_state;
         let mut history = chat_history;
-        move |title: String| {
+        move |(title, note_type): (String, String)| {
             let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) else {
                 history
                     .write()
                     .push(ChatEntry::Error("open a vault first".into()));
                 return;
             };
-            match vault_actions::create_note(&root, &title) {
+            let result = if note_type.is_empty() {
+                vault_actions::create_note(&root, &title)
+            } else {
+                let body = settings::render_template(&note_type, &title);
+                vault_actions::create_note_from_template(&root, &title, &body)
+            };
+            match result {
                 Ok(created) => {
                     let id = NoteId(created.relative_path.clone());
-                    let content = std::fs::read_to_string(&created.absolute_path).unwrap_or_default();
+                    let content =
+                        std::fs::read_to_string(&created.absolute_path).unwrap_or_default();
                     let mut s = app_state.write();
                     s.current_note = Some(id);
                     s.editor_content = content;
                     s.editor_dirty = false;
                     drop(s);
+                    let type_label = if note_type.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" (type: {note_type})")
+                    };
                     history.write().push(ChatEntry::LocalReply {
                         command: "/note".into(),
-                        body: format!("created {}", created.relative_path),
+                        body: format!("created {}{type_label}", created.relative_path),
                     });
                 }
                 Err(err) => {
-                    history.write().push(ChatEntry::Error(format!(
-                        "failed to create note: {err}"
-                    )));
+                    history
+                        .write()
+                        .push(ChatEntry::Error(format!("failed to create note: {err}")));
                 }
             }
         }
@@ -383,7 +395,13 @@ fn handle_send(
             history.write().push(ChatEntry::Error(err));
         }
         None => {
-            chat_tx.send(ChatCommand::Send(text));
+            // Inject current-note context so Claude knows what the user is looking at.
+            let ctx = build_context(*app_state);
+            let enriched = match &ctx.current_note_relative {
+                Some(rel) => format!("[Open note: {rel}]\n\n{text}"),
+                None => text,
+            };
+            chat_tx.send(ChatCommand::Send(enriched));
         }
     }
 }

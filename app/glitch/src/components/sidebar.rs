@@ -1,11 +1,16 @@
+use crate::settings;
 use crate::state::AppState;
 use crate::types::default_emoji;
 use dioxus::prelude::*;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
 use std::collections::HashSet;
 
+/// (title, note_type) — note_type is empty string for "no type / plain note"
 #[component]
-pub fn Sidebar(state: Signal<AppState>, on_create_note: EventHandler<String>) -> Element {
+pub fn Sidebar(
+    state: Signal<AppState>,
+    on_create_note: EventHandler<(String, String)>,
+) -> Element {
     let tree = state
         .read()
         .vault
@@ -14,7 +19,6 @@ pub fn Sidebar(state: Signal<AppState>, on_create_note: EventHandler<String>) ->
     let total = tree.as_ref().map(|t| t.note_count()).unwrap_or(0);
 
     let expanded = use_signal(|| {
-        // Default: top-level folders expanded.
         let mut set = HashSet::new();
         if let Some(t) = &tree {
             for f in &t.folders {
@@ -26,17 +30,22 @@ pub fn Sidebar(state: Signal<AppState>, on_create_note: EventHandler<String>) ->
 
     let mut new_note_open = use_signal(|| false);
     let mut new_note_title = use_signal(String::new);
+    let mut new_note_type = use_signal(String::new);
     let has_vault = state.read().vault.is_some();
 
     let current = state.read().current_note.clone();
+
+    let available_types = settings::load_types();
 
     let submit = move |_evt| {
         let title = new_note_title.read().trim().to_string();
         if title.is_empty() {
             return;
         }
-        on_create_note.call(title);
+        let note_type = new_note_type.read().clone();
+        on_create_note.call((title, note_type));
         new_note_title.set(String::new());
+        new_note_type.set(String::new());
         new_note_open.set(false);
     };
 
@@ -53,6 +62,7 @@ pub fn Sidebar(state: Signal<AppState>, on_create_note: EventHandler<String>) ->
                         new_note_open.set(next);
                         if !next {
                             new_note_title.set(String::new());
+                            new_note_type.set(String::new());
                         }
                     },
                     "+ New"
@@ -69,20 +79,38 @@ pub fn Sidebar(state: Signal<AppState>, on_create_note: EventHandler<String>) ->
                         onkeydown: {
                             let mut new_note_open = new_note_open;
                             let mut new_note_title = new_note_title;
+                            let mut new_note_type = new_note_type;
                             let on_create_note = on_create_note;
                             move |evt: KeyboardEvent| {
                                 if evt.key() == Key::Enter {
                                     evt.prevent_default();
                                     let title = new_note_title.read().trim().to_string();
                                     if !title.is_empty() {
-                                        on_create_note.call(title);
+                                        let note_type = new_note_type.read().clone();
+                                        on_create_note.call((title, note_type));
                                         new_note_title.set(String::new());
+                                        new_note_type.set(String::new());
                                         new_note_open.set(false);
                                     }
                                 } else if evt.key() == Key::Escape {
                                     evt.prevent_default();
                                     new_note_title.set(String::new());
+                                    new_note_type.set(String::new());
                                     new_note_open.set(false);
+                                }
+                            }
+                        }
+                    }
+                    select {
+                        class: "new-note-type-select",
+                        onchange: move |evt: FormEvent| new_note_type.set(evt.value()),
+                        option { value: "", "type…" }
+                        for t in &available_types {
+                            {
+                                let tname = t.name.clone();
+                                let temoji = t.emoji.clone();
+                                rsx! {
+                                    option { value: "{tname}", "{temoji} {tname}" }
                                 }
                             }
                         }
@@ -178,11 +206,7 @@ fn NoteRow(
     state: Signal<AppState>,
 ) -> Element {
     let active = current.as_ref() == Some(&note.id);
-    let class = if active {
-        "tree-row tree-note active"
-    } else {
-        "tree-row tree-note"
-    };
+    let class = if active { "tree-row tree-note active" } else { "tree-row tree-note" };
     let indent = format!("padding-left: {}px", depth * 12 + 22);
     let id = note.id.clone();
     let kw_count = note.keywords.len();
@@ -191,7 +215,11 @@ fn NoteRow(
         div {
             class: "{class}",
             style: "{indent}",
-            title: if kw_count > 0 { format!("{} keyword(s): {}", kw_count, note.keywords.join(", ")) } else { String::new() },
+            title: if kw_count > 0 {
+                format!("{} keyword(s): {}", kw_count, note.keywords.join(", "))
+            } else {
+                String::new()
+            },
             onclick: {
                 let id = id.clone();
                 let mut state = state;
@@ -207,12 +235,8 @@ fn NoteRow(
 }
 
 fn load_note(state: &mut Signal<AppState>, id: NoteId) {
-    let Some(vault) = state.read().vault.clone() else {
-        return;
-    };
-    let Some(note) = vault.notes.iter().find(|n| n.id == id) else {
-        return;
-    };
+    let Some(vault) = state.read().vault.clone() else { return };
+    let Some(note) = vault.notes.iter().find(|n| n.id == id) else { return };
     let content = match note.read_content() {
         Ok(c) => c,
         Err(err) => {

@@ -382,7 +382,7 @@ html, body, #main {
 }
 .slash-row {
     display: grid;
-    grid-template-columns: 96px 1fr 2fr;
+    grid-template-columns: 96px 1fr 2fr 10px;
     gap: 10px;
     align-items: baseline;
     padding: 6px 12px;
@@ -400,6 +400,9 @@ html, body, #main {
 .slash-name { color: var(--accent); font-family: var(--font-mono); font-weight: 600; }
 .slash-args { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
 .slash-desc { color: var(--fg-muted); font-size: 12px; }
+.slash-badge { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-left: auto; }
+.slash-badge-format { background: var(--accent); }
+.slash-badge-action { background: var(--ok); }
 
 .chat-textarea {
     background: var(--bg-input);
@@ -784,7 +787,105 @@ html, body, #main {
 .gtable-cancel-btn { background: none; border: 1px solid var(--border); color: var(--fg-muted); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .gtable-cancel-btn:hover { color: var(--fg); border-color: var(--fg-muted); }
 .tables-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 48px 24px; color: var(--fg-muted); text-align: center; }
-/* Segment-based editor block view — replaces single TipTap + inline-tables split */
+/* Editor title H1 input */
+.editor-title-area {
+    padding: 12px 24px 0;
+    flex-shrink: 0;
+}
+.editor-title-h1 {
+    width: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--fg);
+    font-size: 26px;
+    font-weight: 700;
+    font-family: var(--font-sans);
+    line-height: 1.2;
+    padding: 0;
+}
+.editor-title-h1::placeholder { color: var(--fg-muted); }
+
+/* Detail tab */
+.detail-pane {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.detail-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.detail-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    font-weight: 600;
+}
+.detail-input {
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-family: var(--font-sans);
+    outline: none;
+    width: 100%;
+}
+.detail-input:focus { border-color: var(--accent); }
+.detail-textarea {
+    resize: vertical;
+    min-height: 72px;
+    font-family: var(--font-sans);
+    line-height: 1.5;
+}
+.detail-select {
+    cursor: pointer;
+}
+
+/* Delete note */
+.editor-delete-btn {
+    color: var(--fg-muted);
+    margin-left: 4px;
+}
+.editor-delete-btn:hover { color: var(--error); border-color: var(--error); }
+.editor-delete-confirm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 4px;
+    font-size: 12px;
+    color: var(--error);
+}
+.btn-danger {
+    background: rgba(247, 118, 142, 0.15);
+    color: var(--error);
+    border-color: var(--error);
+}
+.btn-danger:hover { background: rgba(247, 118, 142, 0.3); }
+
+/* Sidebar new-note type dropdown */
+.new-note-type-select {
+    background: var(--bg-input);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 12px;
+    font-family: var(--font-sans);
+    outline: none;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.new-note-type-select:focus { border-color: var(--accent); }
+
+/* Segment-based editor block view (legacy, kept for ref) */
 .editor-block-view { flex: 1; overflow-y: auto; display: flex; flex-direction: column; position: relative; }
 .tiptap-seg { border: none; width: 100%; display: block; background: var(--bg); }
 .inline-table-block { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 12px 18px; background: var(--bg-elevated); }

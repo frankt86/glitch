@@ -8,57 +8,54 @@ pub struct CommandHint {
     pub name: &'static str,
     pub args: &'static str,
     pub description: &'static str,
-    /// What to insert into the input when chosen — usually `/name ` with a
-    /// trailing space for arguments, or `/name` for argless commands.
+    /// What to insert into the input when chosen.
     pub insertion: &'static str,
+    /// If Some, the command maps to a TipTap formatting action rather than
+    /// going to the AI. The value is the format identifier sent to TipTap.
+    pub tiptap_cmd: Option<&'static str>,
 }
 
 pub const COMMANDS: &[CommandHint] = &[
-    CommandHint {
-        name: "note",
-        args: "<title>",
-        description: "ask Claude to create a new note in the vault root",
-        insertion: "/note ",
-    },
-    CommandHint {
-        name: "extract",
-        args: "<url>",
-        description: "fetch an article and save as a note (runs in Glitch, no AI)",
-        insertion: "/extract ",
-    },
-    CommandHint {
-        name: "explain",
-        args: "",
-        description: "summarise the currently open note",
-        insertion: "/explain",
-    },
-    CommandHint {
-        name: "connect",
-        args: "",
-        description: "find related notes (placeholder)",
-        insertion: "/connect",
-    },
-    CommandHint {
-        name: "table",
-        args: "",
-        description: "insert an interactive data table into this note",
-        insertion: "/table",
-    },
-    CommandHint {
-        name: "help",
-        args: "",
-        description: "show available commands",
-        insertion: "/help",
-    },
+    // ── Headings ──────────────────────────────────────────────────────────────
+    CommandHint { name: "h1",       args: "", description: "Heading 1",         insertion: "/h1",       tiptap_cmd: Some("h1") },
+    CommandHint { name: "h2",       args: "", description: "Heading 2",         insertion: "/h2",       tiptap_cmd: Some("h2") },
+    CommandHint { name: "h3",       args: "", description: "Heading 3",         insertion: "/h3",       tiptap_cmd: Some("h3") },
+    CommandHint { name: "h4",       args: "", description: "Heading 4",         insertion: "/h4",       tiptap_cmd: Some("h4") },
+    CommandHint { name: "h5",       args: "", description: "Heading 5",         insertion: "/h5",       tiptap_cmd: Some("h5") },
+    CommandHint { name: "h6",       args: "", description: "Heading 6",         insertion: "/h6",       tiptap_cmd: Some("h6") },
+    // ── Inline formatting ─────────────────────────────────────────────────────
+    CommandHint { name: "bold",     args: "", description: "Bold",              insertion: "/bold",     tiptap_cmd: Some("bold") },
+    CommandHint { name: "italic",   args: "", description: "Italic",            insertion: "/italic",   tiptap_cmd: Some("italic") },
+    CommandHint { name: "strike",   args: "", description: "Strikethrough",     insertion: "/strike",   tiptap_cmd: Some("strike") },
+    CommandHint { name: "code",     args: "", description: "Inline code",       insertion: "/code",     tiptap_cmd: Some("code") },
+    // ── Block elements ────────────────────────────────────────────────────────
+    CommandHint { name: "codeblock",args: "", description: "Code block",        insertion: "/codeblock",tiptap_cmd: Some("codeblock") },
+    CommandHint { name: "quote",    args: "", description: "Block quote",       insertion: "/quote",    tiptap_cmd: Some("quote") },
+    CommandHint { name: "bullet",   args: "", description: "Bullet list",       insertion: "/bullet",   tiptap_cmd: Some("bullet") },
+    CommandHint { name: "numbered", args: "", description: "Numbered list",     insertion: "/numbered", tiptap_cmd: Some("numbered") },
+    CommandHint { name: "divider",  args: "", description: "Horizontal divider",insertion: "/divider",  tiptap_cmd: Some("divider") },
+    // ── Data ──────────────────────────────────────────────────────────────────
+    CommandHint { name: "table",    args: "", description: "Insert an interactive data table", insertion: "/table", tiptap_cmd: None },
+    // ── Actions ───────────────────────────────────────────────────────────────
+    CommandHint { name: "note",     args: "<title>", description: "Create a new note",         insertion: "/note ",    tiptap_cmd: None },
+    CommandHint { name: "extract",  args: "<url>",   description: "Fetch an article as a note",insertion: "/extract ", tiptap_cmd: None },
+    CommandHint { name: "explain",  args: "",         description: "Summarise the current note",insertion: "/explain",  tiptap_cmd: None },
+    CommandHint { name: "connect",  args: "",         description: "Find related notes",        insertion: "/connect",  tiptap_cmd: None },
+    CommandHint { name: "help",     args: "",         description: "Show available commands",   insertion: "/help",     tiptap_cmd: None },
 ];
 
+/// Return the TipTap format command string for a given insertion token, if any.
+pub fn tiptap_cmd_for(insertion: &str) -> Option<&'static str> {
+    COMMANDS
+        .iter()
+        .find(|c| c.insertion == insertion)
+        .and_then(|c| c.tiptap_cmd)
+}
+
 /// Returns the slash query (text after `/`) if `text` is a slash-command-in-progress.
-/// `None` means: not a slash command, hide the palette.
 pub fn slash_query(text: &str) -> Option<&str> {
     let t = text.trim_start();
     let stripped = t.strip_prefix('/')?;
-    // If the user has already typed past the command name (a space followed by
-    // arguments), hide the palette — they're typing args, not picking a command.
     if stripped.contains(char::is_whitespace) {
         return None;
     }
@@ -96,6 +93,7 @@ pub fn SlashPalette(
                 {
                     let h = *hint;
                     let class = if i == active { "slash-row active" } else { "slash-row" };
+                    let badge = if h.tiptap_cmd.is_some() { "format" } else { "action" };
                     rsx! {
                         button {
                             class: "{class}",
@@ -103,6 +101,7 @@ pub fn SlashPalette(
                             span { class: "slash-name", "/{h.name}" }
                             span { class: "slash-args", "{h.args}" }
                             span { class: "slash-desc", "{h.description}" }
+                            span { class: "slash-badge slash-badge-{badge}" }
                         }
                     }
                 }

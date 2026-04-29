@@ -1,5 +1,8 @@
-use crate::components::slash_palette::{matches as palette_matches, slash_query, SlashPalette};
+use crate::components::slash_palette::{
+    matches as palette_matches, slash_query, tiptap_cmd_for, SlashPalette,
+};
 use crate::components::table::GlitchTableView;
+use crate::settings;
 use crate::state::AppState;
 use crate::vault_actions;
 use camino::Utf8PathBuf;
@@ -16,18 +19,43 @@ const TIPTAP_SRC: &str = "http://glitch-editor.localhost/";
 #[cfg(not(windows))]
 const TIPTAP_SRC: &str = "glitch-editor://localhost/";
 
-/// Push raw markdown to the single TipTap iframe. Tables are kept as-is;
-/// TipTap renders them inline via the GlitchCodeBlock NodeView.
+/// Push raw markdown to the TipTap iframe.
+/// Strips frontmatter, then also strips any leading `# Heading` line —
+/// that heading is shown in the editor-title-h1 input instead.
 fn push_to_tiptap(content: &str) {
-    let json = serde_json::to_string(content).unwrap_or_else(|_| "\"\"".into());
+    let (_, body) = split_frontmatter(content);
+    let body_to_show = strip_leading_h1(&body);
+    let json = serde_json::to_string(&body_to_show).unwrap_or_else(|_| "\"\"".into());
     document::eval(&format!(
         "var f=document.getElementById('glitch-tiptap');\
          if(f&&f.contentWindow)f.contentWindow.postMessage({{type:'set-content',content:{json}}},'*');"
     ));
 }
 
-/// Tell TipTap to delete the /command text at the cursor, then insert a
-/// default glitch-table code block at that position.
+/// Strip a leading `# Heading` line from the body (any H1, not just matching the title).
+fn strip_leading_h1(body: &str) -> String {
+    let trimmed = body.trim_start_matches('\n');
+    if trimmed.starts_with("# ") {
+        let after = trimmed.find('\n').map(|i| &trimmed[i..]).unwrap_or("");
+        return after.trim_start_matches(['\r', '\n']).to_string();
+    }
+    body.to_string()
+}
+
+/// Extract the text of a leading `# Heading` line, if present.
+fn extract_leading_h1(body: &str) -> Option<String> {
+    let trimmed = body.trim_start_matches('\n');
+    let rest = trimmed.strip_prefix("# ")?;
+    let heading = rest.lines().next()?.trim().to_string();
+    if heading.is_empty() { None } else { Some(heading) }
+}
+
+/// True if the body (after frontmatter) starts with any `# Heading`.
+fn body_has_leading_h1(content: &str) -> bool {
+    let (_, body) = split_frontmatter(content);
+    body.trim_start_matches('\n').starts_with("# ")
+}
+
 fn insert_table_in_tiptap() {
     document::eval(
         "var f=document.getElementById('glitch-tiptap');\
@@ -38,8 +66,6 @@ fn insert_table_in_tiptap() {
     );
 }
 
-/// Tell TipTap to delete the /command text at the cursor (used by non-table
-/// slash commands selected from the Edit-tab palette).
 fn clear_tiptap_slash() {
     document::eval(
         "var f=document.getElementById('glitch-tiptap');\
@@ -47,10 +73,217 @@ fn clear_tiptap_slash() {
     );
 }
 
-/// Default glitch-table block for the Source tab and Tables tab.
+/// Send a formatting command to TipTap. The iframe clears the /command text
+/// then applies the format in a single message handler.
+fn send_format_to_tiptap(cmd: &str) {
+    let cmd_json = serde_json::to_string(cmd).unwrap_or_else(|_| "\"\"".into());
+    document::eval(&format!(
+        "var f=document.getElementById('glitch-tiptap');\
+         if(f&&f.contentWindow)\
+           f.contentWindow.postMessage({{type:'format-command',command:{cmd_json}}},'*');"
+    ));
+}
+
+/// Map a TipTap format command to the raw markdown prefix/delimiter for the Source tab.
+fn format_cmd_to_markdown(cmd: &str) -> &'static str {
+    match cmd {
+        "h1"        => "# ",
+        "h2"        => "## ",
+        "h3"        => "### ",
+        "h4"        => "#### ",
+        "h5"        => "##### ",
+        "h6"        => "###### ",
+        "quote"     => "> ",
+        "bullet"    => "- ",
+        "numbered"  => "1. ",
+        "divider"   => "---",
+        "bold"      => "**",
+        "italic"    => "_",
+        "strike"    => "~~",
+        "code"      => "`",
+        "codeblock" => "```",
+        _           => "",
+    }
+}
+
 fn make_default_table_block() -> String {
     "```glitch-table\n{\n  \"schema\": {\n    \"columns\": [\n      { \"name\": \"Name\", \"type\": \"text\" }\n    ]\n  },\n  \"rows\": []\n}\n```"
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Frontmatter helpers
+// ---------------------------------------------------------------------------
+
+/// Split a note into (yaml_string, body_string).
+/// Returns ("", full_content) if there is no frontmatter block.
+fn split_frontmatter(content: &str) -> (String, String) {
+    let c = content.replace("\r\n", "\n");
+    if let Some(after) = c.strip_prefix("---\n") {
+        if let Some(pos) = after.find("\n---\n") {
+            return (after[..pos].to_string(), after[pos + 5..].to_string());
+        }
+        // Handle "---" at very end of file (no trailing newline after closing ---)
+        if after.ends_with("\n---") {
+            let pos = after.len() - 4;
+            return (after[..pos].to_string(), String::new());
+        }
+    }
+    (String::new(), c)
+}
+
+fn join_frontmatter(yaml: &str, body: &str) -> String {
+    if yaml.is_empty() {
+        body.to_string()
+    } else {
+        format!("---\n{yaml}\n---\n{body}")
+    }
+}
+
+/// Read one scalar field from a YAML block.
+/// Uses split_once(':') so URLs with colons are handled correctly.
+fn get_yaml_field(yaml: &str, key: &str) -> String {
+    for line in yaml.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim() == key {
+                let v = v.trim();
+                if let Some(inner) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+                    return inner.to_string();
+                }
+                if let Some(inner) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+                    return inner.to_string();
+                }
+                return v.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Write (or add) one field in the YAML block.
+fn set_yaml_field(yaml: &str, key: &str, value: &str) -> String {
+    let formatted = format_yaml_value(key, value);
+    let mut found = false;
+    let mut lines: Vec<String> = yaml
+        .lines()
+        .map(|line| {
+            if let Some((k, _)) = line.split_once(':') {
+                if k.trim() == key {
+                    found = true;
+                    return format!("{key}: {formatted}");
+                }
+            }
+            line.to_string()
+        })
+        .collect();
+    if !found {
+        lines.push(format!("{key}: {formatted}"));
+    }
+    lines.join("\n")
+}
+
+fn format_yaml_value(key: &str, value: &str) -> String {
+    if key == "tags" || key == "keywords" {
+        return tags_str_to_yaml(value);
+    }
+    if value.is_empty() {
+        return "\"\"".to_string();
+    }
+    if value.contains(':')
+        || value.contains('#')
+        || value.starts_with('{')
+        || value.starts_with('[')
+        || value.starts_with('\'')
+    {
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        return format!("\"{escaped}\"");
+    }
+    value.to_string()
+}
+
+/// "[tag1, tag2]" → "tag1, tag2";  "[]" → ""
+fn yaml_tags_to_str(raw: &str) -> String {
+    let t = raw.trim();
+    if t == "[]" || t.is_empty() {
+        return String::new();
+    }
+    t.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// "tag1, tag2" → "[tag1, tag2]";  "" → "[]"
+fn tags_str_to_yaml(s: &str) -> String {
+    let parts: Vec<&str> = s.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    if parts.is_empty() {
+        "[]".into()
+    } else {
+        format!("[{}]", parts.join(", "))
+    }
+}
+
+/// Update one YAML field inside a full note (frontmatter + body).
+fn update_content_field(content: &str, key: &str, value: &str) -> String {
+    let (yaml, body) = split_frontmatter(content);
+    let new_yaml = if yaml.is_empty() {
+        // No frontmatter yet — create it with just this field.
+        format!("{key}: {}", format_yaml_value(key, value))
+    } else {
+        set_yaml_field(&yaml, key, value)
+    };
+    join_frontmatter(&new_yaml, &body)
+}
+
+// ---------------------------------------------------------------------------
+// Detail-tab field definitions per note type
+// ---------------------------------------------------------------------------
+
+/// Returns (display_label, yaml_key, input_hint) for the Detail tab.
+/// hint: "text" | "url" | "textarea" | "tags" | "type-select"
+fn fields_for_type(note_type: &str) -> Vec<(&'static str, &'static str, &'static str)> {
+    match note_type {
+        "article" => vec![
+            ("Type", "type", "type-select"),
+            ("Source URL", "source", "url"),
+            ("Author", "author", "text"),
+            ("Fetched", "fetched", "text"),
+            ("Excerpt", "excerpt", "textarea"),
+            ("Tags", "tags", "tags"),
+        ],
+        "meeting" => vec![
+            ("Type", "type", "type-select"),
+            ("Date", "date", "text"),
+            ("Attendees", "attendees", "text"),
+            ("Tags", "tags", "tags"),
+        ],
+        "book" => vec![
+            ("Type", "type", "type-select"),
+            ("Author", "author", "text"),
+            ("Started", "started", "text"),
+            ("Finished", "finished", "text"),
+            ("Tags", "tags", "tags"),
+        ],
+        "person" => vec![
+            ("Type", "type", "type-select"),
+            ("Role", "role", "text"),
+            ("Contact", "contact", "text"),
+            ("Tags", "tags", "tags"),
+        ],
+        "project" => vec![
+            ("Type", "type", "type-select"),
+            ("Status", "status", "text"),
+            ("Started", "started", "text"),
+            ("Tags", "tags", "tags"),
+        ],
+        _ => vec![
+            ("Type", "type", "type-select"),
+            ("Tags", "tags", "tags"),
+        ],
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +309,7 @@ fn strip_slash_line(content: &str) -> String {
 #[derive(Clone, PartialEq)]
 enum EditorTab {
     Edit,
+    Detail,
     Source,
     History,
     Tables,
@@ -99,10 +333,13 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     let mut hist_state = use_signal(|| HistoryState::Idle);
     let mut hist_note = use_signal(|| Option::<String>::None);
     let mut last_pushed_note: Signal<Option<String>> = use_signal(|| None);
-    // Slash text forwarded from TipTap via postMessage → drives SlashPalette.
     let mut tiptap_slash_text = use_signal(String::new);
-    // True when TipTap fires tiptap-ready; consumed during the same render.
     let mut tiptap_ready = use_signal(|| false);
+    let mut delete_pending = use_signal(|| false);
+    // Tracks whether the current note's body starts with "# {title}" so we can
+    // reconstruct that heading when TipTap content-changed fires (we strip it
+    // on push to avoid showing the title twice alongside editor-title-h1).
+    let mut note_has_leading_h1 = use_signal(|| false);
 
     let title = state
         .read()
@@ -120,12 +357,13 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         .clone()
         .map(|id| id.as_str().to_string());
 
-    // Reset history when note changes.
+    // Reset history and delete-confirm when note changes.
     {
         let note_key = current_rel.clone();
         if *hist_note.read() != note_key {
             hist_note.set(note_key);
             hist_state.set(HistoryState::Idle);
+            delete_pending.set(false);
         }
     }
 
@@ -134,24 +372,23 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         let note_key = current_rel.clone();
         if *last_pushed_note.read() != note_key {
             last_pushed_note.set(note_key);
+            note_has_leading_h1.set(body_has_leading_h1(&content));
             push_to_tiptap(&content);
         }
     }
 
-    // When TipTap finishes (re)loading, push current content.
     if *tiptap_ready.read() {
         tiptap_ready.set(false);
         push_to_tiptap(&content);
     }
 
-    // Mirror last line so the Source-tab SlashPalette stays reactive.
     let mut palette_text = use_signal(String::new);
     let last_line = content.rsplit('\n').next().unwrap_or(&content).to_string();
     if *palette_text.read() != last_line {
         palette_text.set(last_line);
     }
 
-    // Bridge: listen for postMessages from the TipTap iframe (once on mount).
+    // Bridge: listen for postMessages from the TipTap iframe.
     use_effect(move || {
         spawn(async move {
             let mut eval = document::eval(
@@ -168,7 +405,20 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         Some("content-changed") => {
                             if let Some(md) = val.get("content").and_then(|c| c.as_str()) {
                                 let mut s = state.write();
-                                s.editor_content = md.to_string();
+                                let (yaml, _) = split_frontmatter(&s.editor_content);
+                                // If the note originally had "# Title" as its first body
+                                // line, put it back (we stripped it on push to TipTap).
+                                let body = if *note_has_leading_h1.read() {
+                                    let title = get_yaml_field(&yaml, "title");
+                                    if title.is_empty() {
+                                        md.to_string()
+                                    } else {
+                                        format!("# {title}\n\n{md}")
+                                    }
+                                } else {
+                                    md.to_string()
+                                };
+                                s.editor_content = join_frontmatter(&yaml, &body);
                                 s.editor_dirty = true;
                             }
                         }
@@ -179,9 +429,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             let is_null = val.get("query").map_or(true, |q| q.is_null());
                             if is_null {
                                 tiptap_slash_text.set(String::new());
-                            } else if let Some(q) =
-                                val.get("query").and_then(|q| q.as_str())
-                            {
+                            } else if let Some(q) = val.get("query").and_then(|q| q.as_str()) {
                                 tiptap_slash_text.set(format!("/{q}"));
                             }
                         }
@@ -213,9 +461,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                 hist_state.set(HistoryState::Loading);
                 spawn(async move {
                     match glitch_sync::file_history(&root, &rel).await {
-                        Ok(commits) if commits.is_empty() => {
-                            hist_state.set(HistoryState::Empty)
-                        }
+                        Ok(commits) if commits.is_empty() => hist_state.set(HistoryState::Empty),
                         Ok(commits) => hist_state.set(HistoryState::Commits(commits)),
                         Err(e) => hist_state.set(HistoryState::Error(e.to_string())),
                     }
@@ -225,10 +471,25 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     };
 
     let current_tab = tab.read().clone();
-    let show_save =
-        matches!(current_tab, EditorTab::Edit | EditorTab::Source | EditorTab::Tables);
+    let show_save = matches!(
+        current_tab,
+        EditorTab::Edit | EditorTab::Detail | EditorTab::Source | EditorTab::Tables
+    );
     let tables = parse_all_tables(&content);
     let has_tables = !tables.is_empty();
+
+    // Derive frontmatter values for title H1 and Detail tab.
+    let (yaml, body) = split_frontmatter(&content);
+    // Use frontmatter title if set; fall back to the leading # heading in the body.
+    let fm_title = {
+        let t = get_yaml_field(&yaml, "title");
+        if t.is_empty() {
+            extract_leading_h1(&body).unwrap_or_default()
+        } else {
+            t
+        }
+    };
+    let note_type = get_yaml_field(&yaml, "type");
 
     rsx! {
         section { class: "editor",
@@ -239,11 +500,17 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         onclick: move |_| {
                             if *tab.read() != EditorTab::Edit {
                                 tab.set(EditorTab::Edit);
-                                // Sync Source edits into TipTap when switching back.
                                 push_to_tiptap(&state.read().editor_content);
                             }
                         },
                         "Edit"
+                    }
+                    if has_note {
+                        button {
+                            class: if current_tab == EditorTab::Detail { "editor-tab active" } else { "editor-tab" },
+                            onclick: move |_| tab.set(EditorTab::Detail),
+                            "Detail"
+                        }
                     }
                     button {
                         class: if current_tab == EditorTab::Source { "editor-tab active" } else { "editor-tab" },
@@ -279,22 +546,86 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         "Save"
                     }
                 }
+                // Delete note button with inline confirmation.
+                if has_note {
+                    if *delete_pending.read() {
+                        span { class: "editor-delete-confirm",
+                            span { "Delete this note?" }
+                            button {
+                                class: "btn btn-danger",
+                                onclick: {
+                                    let mut state = state;
+                                    move |_| {
+                                        delete_pending.set(false);
+                                        delete_current(&mut state);
+                                    }
+                                },
+                                "Yes, delete"
+                            }
+                            button {
+                                class: "btn",
+                                onclick: move |_| delete_pending.set(false),
+                                "Cancel"
+                            }
+                        }
+                    } else {
+                        button {
+                            class: "btn editor-delete-btn",
+                            title: "Delete this note",
+                            onclick: move |_| delete_pending.set(true),
+                            "🗑"
+                        }
+                    }
+                }
             }
 
             if current_tab == EditorTab::Edit {
+                // Title H1 input above the TipTap iframe.
+                div { class: "editor-title-area",
+                    input {
+                        class: "editor-title-h1",
+                        r#type: "text",
+                        placeholder: "Untitled",
+                        value: "{fm_title}",
+                        oninput: {
+                            let mut state = state;
+                            move |evt: FormEvent| {
+                                let new_title = evt.value();
+                                let mut s = state.write();
+                                let (yaml, body) = split_frontmatter(&s.editor_content);
+                                let new_yaml = set_yaml_field(&yaml, "title", &new_title);
+                                // Keep the body # heading in sync if the note has one.
+                                let new_body = if *note_has_leading_h1.read() {
+                                    let trimmed = body.trim_start_matches('\n');
+                                    let after_h1 = trimmed
+                                        .find('\n')
+                                        .map(|i| trimmed[i..].trim_start_matches('\n'))
+                                        .unwrap_or("");
+                                    format!("# {new_title}\n\n{after_h1}")
+                                } else {
+                                    body
+                                };
+                                s.editor_content = join_frontmatter(&new_yaml, &new_body);
+                                s.editor_dirty = true;
+                            }
+                        }
+                    }
+                }
                 div { class: "editor-single",
                     div { class: "editor-pane",
-                        // Slash palette driven by TipTap's slash-changed messages.
                         SlashPalette {
                             text: tiptap_slash_text,
                             selected: palette_index,
                             on_select: {
                                 let on_command = on_command;
                                 move |insertion: &'static str| {
-                                    if insertion.trim() == "/table" {
+                                    let cmd = insertion.trim();
+                                    if cmd == "/table" {
                                         insert_table_in_tiptap();
+                                    } else if let Some(fmt) = tiptap_cmd_for(cmd) {
+                                        send_format_to_tiptap(fmt);
                                     } else {
-                                        on_command.call(insertion.trim().to_string());
+                                        on_command.call(cmd.to_string());
                                         clear_tiptap_slash();
                                     }
                                     palette_index.set(0);
@@ -302,11 +633,139 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 }
                             }
                         }
-                        // Single TipTap iframe — tables appear inline via NodeView.
                         iframe {
                             id: "glitch-tiptap",
                             class: "tiptap-host",
                             src: TIPTAP_SRC,
+                        }
+                    }
+                }
+            } else if current_tab == EditorTab::Detail {
+                div { class: "editor-single",
+                    div { class: "detail-pane",
+                        div { class: "detail-field",
+                            label { class: "detail-label", "Title" }
+                            input {
+                                class: "detail-input",
+                                r#type: "text",
+                                placeholder: "Untitled",
+                                value: "{fm_title}",
+                                oninput: {
+                                    let mut state = state;
+                                    move |evt: FormEvent| {
+                                        let mut s = state.write();
+                                        s.editor_content = update_content_field(
+                                            &s.editor_content,
+                                            "title",
+                                            &evt.value(),
+                                        );
+                                        s.editor_dirty = true;
+                                    }
+                                }
+                            }
+                        }
+                        for (label, key, hint) in fields_for_type(&note_type) {
+                            {
+                                let raw_val = get_yaml_field(&yaml, key);
+                                let display_val =
+                                    if hint == "tags" { yaml_tags_to_str(&raw_val) } else { raw_val };
+                                if hint == "type-select" {
+                                    let available_types = settings::load_types();
+                                    let cur_type = note_type.clone();
+                                    rsx! {
+                                        div { class: "detail-field", key: "f-{key}",
+                                            label { class: "detail-label", "{label}" }
+                                            select {
+                                                class: "detail-input detail-select",
+                                                onchange: {
+                                                    let mut state = state;
+                                                    move |evt: FormEvent| {
+                                                        let mut s = state.write();
+                                                        s.editor_content = update_content_field(
+                                                            &s.editor_content,
+                                                            "type",
+                                                            &evt.value(),
+                                                        );
+                                                        s.editor_dirty = true;
+                                                    }
+                                                },
+                                                option {
+                                                    value: "",
+                                                    selected: cur_type.is_empty(),
+                                                    "— none —"
+                                                }
+                                                for t in available_types {
+                                                    {
+                                                        let tname = t.name.clone();
+                                                        let temoji = t.emoji.clone();
+                                                        let is_sel = tname == cur_type;
+                                                        rsx! {
+                                                            option {
+                                                                value: "{tname}",
+                                                                selected: is_sel,
+                                                                "{temoji} {tname}"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if hint == "textarea" {
+                                    rsx! {
+                                        div { class: "detail-field", key: "f-{key}",
+                                            label { class: "detail-label", "{label}" }
+                                            textarea {
+                                                class: "detail-input detail-textarea",
+                                                value: "{display_val}",
+                                                oninput: {
+                                                    let mut state = state;
+                                                    move |evt: FormEvent| {
+                                                        let mut s = state.write();
+                                                        s.editor_content = update_content_field(
+                                                            &s.editor_content,
+                                                            key,
+                                                            &evt.value(),
+                                                        );
+                                                        s.editor_dirty = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // text, url, tags
+                                    let itype = if hint == "url" { "url" } else { "text" };
+                                    rsx! {
+                                        div { class: "detail-field", key: "f-{key}",
+                                            label { class: "detail-label", "{label}" }
+                                            input {
+                                                class: "detail-input",
+                                                r#type: "{itype}",
+                                                value: "{display_val}",
+                                                oninput: {
+                                                    let mut state = state;
+                                                    move |evt: FormEvent| {
+                                                        let raw = evt.value();
+                                                        let write_val = if hint == "tags" {
+                                                            tags_str_to_yaml(&raw)
+                                                        } else {
+                                                            raw
+                                                        };
+                                                        let mut s = state.write();
+                                                        s.editor_content = update_content_field(
+                                                            &s.editor_content,
+                                                            key,
+                                                            &write_val,
+                                                        );
+                                                        s.editor_dirty = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -320,19 +779,31 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 let mut state = state;
                                 let on_command = on_command;
                                 move |insertion: &'static str| {
-                                    if insertion.trim() == "/table" {
+                                    let cmd = insertion.trim();
+                                    if cmd == "/table" {
                                         let block = make_default_table_block();
                                         let mut s = state.write();
-                                        let base =
-                                            strip_slash_line(&s.editor_content)
-                                                .trim_end()
-                                                .to_string();
+                                        let base = strip_slash_line(&s.editor_content)
+                                            .trim_end()
+                                            .to_string();
                                         s.editor_content = format!("{}\n\n{}", base, block);
                                         s.editor_dirty = true;
                                         drop(s);
                                         tab.set(EditorTab::Tables);
+                                    } else if let Some(fmt) = tiptap_cmd_for(cmd) {
+                                        let prefix = format_cmd_to_markdown(fmt);
+                                        let mut s = state.write();
+                                        let base = strip_slash_line(&s.editor_content)
+                                            .trim_end()
+                                            .to_string();
+                                        s.editor_content = if base.is_empty() {
+                                            prefix.to_string()
+                                        } else {
+                                            format!("{}\n{}", base, prefix)
+                                        };
+                                        s.editor_dirty = true;
                                     } else {
-                                        on_command.call(insertion.trim().to_string());
+                                        on_command.call(cmd.to_string());
                                         let mut s = state.write();
                                         s.editor_content = strip_slash_line(&s.editor_content);
                                         s.editor_dirty = true;
@@ -367,7 +838,9 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                     } else {
                                         Vec::new()
                                     };
-                                    if !palette_open || items.is_empty() { return; }
+                                    if !palette_open || items.is_empty() {
+                                        return;
+                                    }
                                     match evt.key() {
                                         Key::ArrowDown => {
                                             evt.prevent_default();
@@ -383,7 +856,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                         }
                                         Key::Enter if !evt.modifiers().shift() => {
                                             evt.prevent_default();
-                                            let i = (*palette_index.read()).min(items.len() - 1);
+                                            let i =
+                                                (*palette_index.read()).min(items.len() - 1);
                                             let chosen = items[i];
                                             let cmd = chosen.insertion.trim();
                                             if cmd == "/table" {
@@ -397,6 +871,18 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                 s.editor_dirty = true;
                                                 drop(s);
                                                 tab.set(EditorTab::Tables);
+                                            } else if let Some(fmt) = tiptap_cmd_for(cmd) {
+                                                let prefix = format_cmd_to_markdown(fmt);
+                                                let mut s = state.write();
+                                                let base = strip_slash_line(&s.editor_content)
+                                                    .trim_end()
+                                                    .to_string();
+                                                s.editor_content = if base.is_empty() {
+                                                    prefix.to_string()
+                                                } else {
+                                                    format!("{}\n{}", base, prefix)
+                                                };
+                                                s.editor_dirty = true;
                                             } else {
                                                 on_command.call(cmd.to_string());
                                                 let mut s = state.write();
@@ -457,11 +943,9 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                         table: table,
                                         on_change: move |updated: GlitchTable| {
                                             let md = s2.read().editor_content.clone();
-                                            if let Some(new_md) = replace_table_block(
-                                                &md,
-                                                block_idx,
-                                                &updated.to_json(),
-                                            ) {
+                                            if let Some(new_md) =
+                                                replace_table_block(&md, block_idx, &updated.to_json())
+                                            {
                                                 let mut sw = s2.write();
                                                 sw.editor_content = new_md;
                                                 sw.editor_dirty = true;
@@ -488,7 +972,27 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
 }
 
 // ---------------------------------------------------------------------------
-// History panel (unchanged)
+// Delete helper
+// ---------------------------------------------------------------------------
+
+fn delete_current(state: &mut Signal<AppState>) {
+    let snapshot = state.read();
+    let Some(note) = snapshot.current_note() else { return };
+    let path = note.absolute_path.clone();
+    drop(snapshot);
+    if let Err(err) = std::fs::remove_file(&path) {
+        tracing::error!("failed to delete {path}: {err}");
+        return;
+    }
+    let mut s = state.write();
+    s.current_note = None;
+    s.editor_content.clear();
+    s.editor_dirty = false;
+    tracing::info!("deleted {path}");
+}
+
+// ---------------------------------------------------------------------------
+// History panel
 // ---------------------------------------------------------------------------
 
 #[component]
@@ -763,5 +1267,36 @@ mod tests {
         let lines = compute_diff_lines("hello\nworld\n", "hello\nearth\n");
         assert!(lines.iter().any(|(t, l)| *t == '-' && l == "world"));
         assert!(lines.iter().any(|(t, l)| *t == '+' && l == "earth"));
+    }
+
+    #[test]
+    fn split_frontmatter_works() {
+        let note = "---\ntitle: \"Hello\"\ntype: article\n---\n# Hello\n\nBody here.";
+        let (yaml, body) = split_frontmatter(note);
+        assert_eq!(yaml, "title: \"Hello\"\ntype: article");
+        assert_eq!(body, "# Hello\n\nBody here.");
+    }
+
+    #[test]
+    fn get_yaml_field_handles_urls() {
+        let yaml = "title: \"Test\"\nsource: https://example.com/page?q=1\ntype: article";
+        assert_eq!(get_yaml_field(yaml, "source"), "https://example.com/page?q=1");
+        assert_eq!(get_yaml_field(yaml, "title"), "Test");
+    }
+
+    #[test]
+    fn yaml_tags_roundtrip() {
+        assert_eq!(yaml_tags_to_str("[rust, dioxus]"), "rust, dioxus");
+        assert_eq!(yaml_tags_to_str("[]"), "");
+        assert_eq!(tags_str_to_yaml("rust, dioxus"), "[rust, dioxus]");
+        assert_eq!(tags_str_to_yaml(""), "[]");
+    }
+
+    #[test]
+    fn update_content_field_creates_frontmatter() {
+        let plain = "# Hello\n\nno frontmatter";
+        let result = update_content_field(plain, "title", "Hello");
+        assert!(result.starts_with("---\n"));
+        assert!(result.contains("title: Hello"));
     }
 }

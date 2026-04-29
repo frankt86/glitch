@@ -441,16 +441,39 @@
         const defaultJson = JSON.stringify(
           { schema: { columns: [{ name: 'Name', type: 'text' }] }, rows: [] }, null, 2
         );
-        // Insert the glitch-table code block
         editor.chain().focus().insertContent({
           type: 'codeBlock',
           attrs: { language: 'glitch-table' },
           content: [{ type: 'text', text: defaultJson }],
         }).run();
-        // Exit the code block so cursor lands in a paragraph after the table.
-        // createParagraphNear() inserts an empty paragraph next to the selection.
         if (editor.isActive('codeBlock')) {
           editor.commands.createParagraphNear();
+        }
+
+      } else if (d.type === 'format-command') {
+        // Clear the /command text the user typed, then apply the format.
+        const { from } = editor.state.selection;
+        const $from = editor.state.doc.resolve(from);
+        const lineStart = $from.start();
+        if (from > lineStart) {
+          editor.commands.deleteRange({ from: lineStart, to: from });
+        }
+        switch (d.command) {
+          case 'h1': editor.chain().focus().toggleHeading({ level: 1 }).run(); break;
+          case 'h2': editor.chain().focus().toggleHeading({ level: 2 }).run(); break;
+          case 'h3': editor.chain().focus().toggleHeading({ level: 3 }).run(); break;
+          case 'h4': editor.chain().focus().toggleHeading({ level: 4 }).run(); break;
+          case 'h5': editor.chain().focus().toggleHeading({ level: 5 }).run(); break;
+          case 'h6': editor.chain().focus().toggleHeading({ level: 6 }).run(); break;
+          case 'bold':      editor.chain().focus().toggleBold().run();        break;
+          case 'italic':    editor.chain().focus().toggleItalic().run();      break;
+          case 'strike':    editor.chain().focus().toggleStrike().run();      break;
+          case 'code':      editor.chain().focus().toggleCode().run();        break;
+          case 'codeblock': editor.chain().focus().toggleCodeBlock().run();   break;
+          case 'quote':     editor.chain().focus().toggleBlockquote().run();  break;
+          case 'bullet':    editor.chain().focus().toggleBulletList().run();  break;
+          case 'numbered':  editor.chain().focus().toggleOrderedList().run(); break;
+          case 'divider':   editor.chain().focus().setHorizontalRule().run(); break;
         }
       }
     });
