@@ -169,6 +169,7 @@ pub fn GlitchTableView(table: GlitchTable, on_change: EventHandler<GlitchTable>)
                                     let indicator = if *sort_col.read() == Some(ci) {
                                         if *sort_asc.read() { " ↑" } else { " ↓" }
                                     } else { "" };
+                                    let col_header = format!("{col_name}{indicator}");
                                     let table_del_col = table.clone();
                                     let on_change_del_col = on_change.clone();
                                     rsx! {
@@ -186,7 +187,7 @@ pub fn GlitchTableView(table: GlitchTable, on_change: EventHandler<GlitchTable>)
                                                         sort_asc.set(true);
                                                     }
                                                 },
-                                                "{col_name}{indicator}"
+                                                "{col_header}"
                                             }
                                             button {
                                                 class: "gtable-th-del-btn",

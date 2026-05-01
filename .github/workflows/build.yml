@@ -26,7 +26,7 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
-  # ── Release build ─────────────────────────────────────────────────────────
+  # ── Release build + MSIX package ─────────────────────────────────────────
   build:
     name: Build (Windows x64)
     runs-on: windows-latest
@@ -44,17 +44,35 @@ jobs:
       - name: Build release binary
         run: cargo build --release -p glitch
 
-      # Upload as a workflow artifact on every successful build.
-      - name: Upload artifact
+      - name: Package MSIX
+        shell: pwsh
+        # MSIX_CERT_PFX / MSIX_CERT_PASSWORD are optional GitHub secrets.
+        # When absent, build-msix.ps1 generates a self-signed dev cert.
+        env:
+          MSIX_CERT_PFX: ${{ secrets.MSIX_CERT_PFX }}
+          MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
+        run: .\packaging\msix\build-msix.ps1 -SkipBuild
+
+      # Upload both artifacts on every successful build.
+      - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: glitch-windows-x64
+          name: glitch-windows-x64-exe
           path: target/release/glitch.exe
           if-no-files-found: error
 
-      # When triggered by a GitHub Release, also attach the binary to it.
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: glitch-windows-x64-msix
+          path: target/glitch.msix
+          if-no-files-found: error
+
+      # When triggered by a GitHub Release, attach both to the release.
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: target/release/glitch.exe
+          files: |
+            target/release/glitch.exe
+            target/glitch.msix
