@@ -623,44 +623,40 @@ html, body, #main {
     border-top: 1px solid var(--border);
 }
 
-/* graph view stub */
-.graph-body {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    padding: 20px;
-}
-.graph-stat {
-    background: var(--bg);
+/* ── Graph view ── */
+.graph-card {
+    background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 16px;
-    text-align: center;
+    border-radius: 10px;
+    overflow: hidden;
+    max-width: 960px;
+    width: 96vw;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
-.graph-stat-num {
-    display: block;
-    font-size: 28px;
-    font-weight: 600;
-    color: var(--accent);
-    font-family: var(--font-mono);
+.graph-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
 }
-.graph-stat-label {
-    display: block;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-muted);
-    margin-top: 4px;
+.graph-title { margin: 0; font-size: 15px; font-weight: 600; flex-shrink: 0; }
+.graph-filters { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap; }
+.graph-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--border); background: none;
+    color: var(--fg-muted); font-size: 12px; font-family: var(--font-sans);
+    cursor: pointer; transition: border-color 0.15s, color 0.15s;
 }
-.graph-coming {
-    padding: 0 20px 20px;
-    color: var(--fg);
-    line-height: 1.55;
-}
-.graph-coming h3 { margin: 0 0 8px; color: var(--warn); font-size: 14px; }
-.graph-coming p { margin: 0 0 8px; font-size: 13px; }
-.graph-coming ul { margin: 8px 0; padding-left: 20px; font-size: 13px; }
-.graph-coming li { margin-bottom: 4px; }
+.graph-chip.active { border-color: var(--accent); color: var(--fg); }
+.chip-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.chip-wikilink  { background: #7aa2f7; }
+.chip-related   { background: transparent; border: 2px dashed #7aa2f7; }
+.chip-hierarchy { background: #4a5068; }
+.chip-keyword   { background: transparent; border: 2px dashed #4a5068; }
+.graph-count { font-size: 11px; color: var(--fg-muted); margin-left: auto; }
+.graph-close { font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0; }
+.graph-svg { background: var(--bg); display: block; }
 
 .badge {
     padding: 3px 8px;
