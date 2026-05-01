@@ -63,10 +63,19 @@ fn main() {
         .with_title("Glitch")
         .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 800.0));
 
+    // WebView2 needs a writable user-data folder. When installed to
+    // Program Files the exe directory is read-only, so point it at
+    // %LOCALAPPDATA%\Glitch\WebView2 which is always user-writable.
+    let webview_data_dir = dirs_next::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Glitch")
+        .join("WebView2");
+
     LaunchBuilder::desktop()
         .with_cfg(
             Config::new()
                 .with_window(window)
+                .with_data_directory(webview_data_dir)
                 .with_custom_head(format!("<style>{STYLES}</style>"))
                 .with_custom_protocol("glitch-editor", |_req| {
                     dioxus::desktop::wry::http::Response::builder()

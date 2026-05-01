@@ -49,6 +49,7 @@ jobs:
         run: |
           winget install --id JRSoftware.InnoSetup --silent --accept-source-agreements --accept-package-agreements
           $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          New-Item build -ItemType Directory -Force | Out-Null
           & $iscc packaging\inno\glitch.iss
 
       - name: Package MSIX
@@ -58,34 +59,34 @@ jobs:
           MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
         run: .\packaging\msix\build-msix.ps1 -SkipBuild
 
-      # Upload artifacts on every successful build.
-      - name: Upload installer artifact
+      # Upload all distributable artifacts from build/.
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: GlitchSetup
-          path: target/GlitchSetup.exe
+          path: build/GlitchSetup.exe
           if-no-files-found: error
 
-      - name: Upload binary artifact
+      - name: Upload MSIX
         uses: actions/upload-artifact@v4
         with:
-          name: glitch-windows-x64-exe
+          name: glitch-msix
+          path: build/glitch.msix
+          if-no-files-found: error
+
+      - name: Upload raw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: glitch-exe
           path: target/release/glitch.exe
           if-no-files-found: error
 
-      - name: Upload MSIX artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: glitch-windows-x64-msix
-          path: target/glitch.msix
-          if-no-files-found: error
-
-      # When triggered by a GitHub Release, attach all three to the release.
+      # Attach all three to GitHub Releases.
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/GlitchSetup.exe
+            build/GlitchSetup.exe
+            build/glitch.msix
             target/release/glitch.exe
-            target/glitch.msix

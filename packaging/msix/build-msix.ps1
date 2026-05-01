@@ -41,6 +41,9 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location $repoRoot
 
+# All distributable output goes to build/ (not target/).
+New-Item "build" -ItemType Directory -Force | Out-Null
+
 # ── 1. Version ────────────────────────────────────────────────────────────────
 # Version lives in the workspace Cargo.toml under [workspace.package].
 $workspaceToml = Get-Content "Cargo.toml" -Raw
@@ -87,7 +90,7 @@ Write-Host "  makeappx: $makeappx"
 Write-Host "  signtool:  $signtool"
 
 # ── 4. Stage layout ───────────────────────────────────────────────────────────
-$staging = "target\msix-staging"
+$staging = "build\msix-staging"
 Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 New-Item "$staging\Assets" -ItemType Directory | Out-Null
 
@@ -146,7 +149,7 @@ New-GlitchIcon "$staging\Assets\StoreLogo.png"           50  50
 New-GlitchIcon "$staging\Assets\SplashScreen.png"       620 300
 
 # ── 6. Pack MSIX ──────────────────────────────────────────────────────────────
-$msixOut = "target\glitch.msix"
+$msixOut = "build\glitch.msix"
 Remove-Item $msixOut -Force -ErrorAction SilentlyContinue
 Write-Host "Packing MSIX..." -ForegroundColor Cyan
 # /nv  — skip semantic validation (icon-size warnings don't fail the build)

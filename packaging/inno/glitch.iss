@@ -16,7 +16,7 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 ; Output
-OutputDir=..\..\target
+OutputDir=..\..\build
 OutputBaseFilename=GlitchSetup
 ; Compression
 Compression=lzma2/ultra64

@@ -61,6 +61,9 @@ dioxus = { version = "0.6", features = ["desktop"] }
 # Native dialogs
 rfd = "0.15"
 
+# Platform dirs
+dirs-next = "2"
+
 # Internal crates
 glitch-core = { path = "crates/glitch-core" }
 glitch-ai = { path = "crates/glitch-ai" }
