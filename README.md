@@ -85,7 +85,7 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - [x] M2.85 — Universal slash-command palette (editor + chat)
 - [x] M3 — TipTap WYSIWYG editor with markdown formatting commands and gap-cursor table navigation
 - [x] M4 — Interactive table grid (sort, filter, typed columns, formulas)
-- [ ] M5 — Embeddings + AI-suggested connections (`fastembed`)
+- [x] M5 — Embeddings + cosine-similarity "Related" tab (`fastembed` BGE-small-en-v1.5)
 - [ ] M6 — Graph view (petgraph + fdg, typed edges)
 - [ ] M7 — Article extractor (`dom_smoothie` + `htmd`)
 - [ ] M8 — MSIX packaging (`winappCli`)

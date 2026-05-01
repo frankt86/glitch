@@ -8,6 +8,7 @@ use crate::vault_actions;
 use camino::Utf8PathBuf;
 use dioxus::prelude::*;
 use glitch_core::{parse_all_tables, replace_table_block, GlitchTable, NoteId};
+use glitch_embed::SimilarNote;
 use glitch_sync::CommitInfo;
 
 // ---------------------------------------------------------------------------
@@ -313,6 +314,16 @@ enum EditorTab {
     Source,
     History,
     Tables,
+    Related,
+}
+
+#[derive(Clone, PartialEq)]
+enum RelatedState {
+    Idle,
+    Loading,
+    /// Loaded for note at `key` (vault-relative path).
+    Results { key: String, notes: Vec<SimilarNote> },
+    Error(String),
 }
 
 #[derive(Clone, PartialEq)]
@@ -340,6 +351,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     // reconstruct that heading when TipTap content-changed fires (we strip it
     // on push to avoid showing the title twice alongside editor-title-h1).
     let mut note_has_leading_h1 = use_signal(|| false);
+    let mut related_state = use_signal(|| RelatedState::Idle);
 
     let title = state
         .read()
@@ -470,6 +482,43 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         }
     };
 
+    let on_related_tab = {
+        let vault_root = vault_root.clone();
+        let current_rel = current_rel.clone();
+        let content = content.clone();
+        move |_| {
+            tab.set(EditorTab::Related);
+            // Don't re-compute if we already have results for this exact note.
+            if let RelatedState::Results { key, .. } = &*related_state.read() {
+                if Some(key.as_str()) == current_rel.as_deref() {
+                    return;
+                }
+            }
+            let (Some(root), Some(rel)) = (&vault_root, &current_rel) else { return };
+            let root = root.clone();
+            let rel = rel.clone();
+            let content = content.clone();
+            related_state.set(RelatedState::Loading);
+            spawn(async move {
+                let root2 = root.clone();
+                let rel2 = rel.clone();
+                let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<SimilarNote>> {
+                    let cache_dir = std::env::var("LOCALAPPDATA")
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|_| std::env::temp_dir())
+                        .join("Glitch").join("models");
+                    glitch_embed::embed_note(&root2, &rel2, &content, &cache_dir)?;
+                    glitch_embed::find_similar(&root2, &rel2, 5)
+                }).await;
+                match result {
+                    Ok(Ok(notes)) => related_state.set(RelatedState::Results { key: rel, notes }),
+                    Ok(Err(e)) => related_state.set(RelatedState::Error(e.to_string())),
+                    Err(e) => related_state.set(RelatedState::Error(e.to_string())),
+                }
+            });
+        }
+    };
+
     let current_tab = tab.read().clone();
     let show_save = matches!(
         current_tab,
@@ -528,6 +577,13 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             class: if current_tab == EditorTab::Tables { "editor-tab active" } else { "editor-tab" },
                             onclick: move |_| tab.set(EditorTab::Tables),
                             "Tables"
+                        }
+                    }
+                    if has_note {
+                        button {
+                            class: if current_tab == EditorTab::Related { "editor-tab active" } else { "editor-tab" },
+                            onclick: on_related_tab,
+                            "Related"
                         }
                     }
                 }
@@ -957,6 +1013,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         }
                     }
                 }
+            } else if current_tab == EditorTab::Related {
+                RelatedPanel { related_state, app_state: state }
             } else {
                 HistoryPanel {
                     hist_state,
@@ -989,6 +1047,75 @@ fn delete_current(state: &mut Signal<AppState>) {
     s.editor_content.clear();
     s.editor_dirty = false;
     tracing::info!("deleted {path}");
+}
+
+// ---------------------------------------------------------------------------
+// Related panel
+// ---------------------------------------------------------------------------
+
+#[component]
+fn RelatedPanel(
+    related_state: Signal<RelatedState>,
+    app_state: Signal<AppState>,
+) -> Element {
+    match related_state.read().clone() {
+        RelatedState::Idle => rsx! {
+            div { class: "related-pane related-idle",
+                p { "Click the Related tab to find similar notes." }
+            }
+        },
+        RelatedState::Loading => rsx! {
+            div { class: "related-pane related-loading",
+                p { "Indexing note…" }
+                p { class: "related-hint", "First run downloads the embedding model (~130 MB)." }
+            }
+        },
+        RelatedState::Error(msg) => rsx! {
+            div { class: "related-pane related-error",
+                p { class: "related-error-msg", "Error: {msg}" }
+            }
+        },
+        RelatedState::Results { notes, .. } => rsx! {
+            div { class: "related-pane",
+                if notes.is_empty() {
+                    p { class: "related-empty", "No similar notes found yet. Add more notes to the vault to see suggestions." }
+                } else {
+                    for note in notes.iter() {
+                        {
+                            let rel = note.rel_path.clone();
+                            let pct = (note.score * 100.0) as u32;
+                            let title = rel
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or(&rel)
+                                .trim_end_matches(".md")
+                                .to_string();
+                            let mut app_state = app_state;
+                            rsx! {
+                                button {
+                                    class: "related-row",
+                                    onclick: move |_| {
+                                        let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
+                                        if let Some(root) = vault {
+                                            let abs = root.join(&rel);
+                                            if let Ok(content) = std::fs::read_to_string(&abs) {
+                                                let mut s = app_state.write();
+                                                s.current_note = Some(glitch_core::NoteId::from_relative(rel.clone()));
+                                                s.editor_content = content;
+                                                s.editor_dirty = false;
+                                            }
+                                        }
+                                    },
+                                    span { class: "related-title", "{title}" }
+                                    span { class: "related-score", "{pct}%" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------

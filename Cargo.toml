@@ -5,6 +5,7 @@ members = [
     "crates/glitch-ai",
     "crates/glitch-sync",
     "crates/glitch-mcp",
+    "crates/glitch-embed",
     "app/glitch",
 ]
 
@@ -65,6 +66,7 @@ glitch-core = { path = "crates/glitch-core" }
 glitch-ai = { path = "crates/glitch-ai" }
 glitch-sync = { path = "crates/glitch-sync" }
 glitch-mcp = { path = "crates/glitch-mcp" }
+glitch-embed = { path = "crates/glitch-embed" }
 
 [profile.dev]
 opt-level = 1

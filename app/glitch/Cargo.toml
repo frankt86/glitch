@@ -16,6 +16,7 @@ glitch-core.workspace = true
 glitch-ai.workspace = true
 glitch-sync.workspace = true
 glitch-mcp.workspace = true
+glitch-embed.workspace = true
 ulid.workspace = true
 
 dioxus.workspace = true
