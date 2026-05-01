@@ -104,7 +104,9 @@
     }
     .gtable-cell-input:focus { background: rgba(122,162,247,0.06); }
     .gtable-checkbox-cell { display: flex; align-items: center; justify-content: center; padding: 6px; }
-    .gtable-formula-cell { padding: 6px 10px; color: #8a8f9d; font-style: italic; font-size: 12px; }
+    .gtable-formula-cell { padding: 6px 10px; color: #9ece6a; font-variant-numeric: tabular-nums; font-size: 13px; }
+    .gtable-formula-err  { color: #f7768e !important; font-style: italic; }
+    .gtable-formula-placeholder { color: #4a5068 !important; font-style: italic; font-size: 12px; }
 
     /* row delete */
     .gtable-row-del {
@@ -139,6 +141,52 @@
     const COL_TYPES = ['text', 'number', 'date', 'checkbox', 'select', 'formula'];
 
     // -------------------------------------------------------------------------
+    // evaluateFormula — compute a formula expression for one row
+    //   expr     : string, e.g. "hours * 75" or "SUM(hours)"
+    //   rowIndex : index into rows array (-1 = aggregate-only, no row ctx)
+    //   cols     : column schema array
+    //   rows     : all row data
+    // Returns a string result, or '#ERR' on evaluation failure.
+    // -------------------------------------------------------------------------
+    function evaluateFormula(expr, rowIndex, cols, rows) {
+      if (!expr || !expr.trim()) return '';
+      // Build row-context: column name → value for non-formula columns
+      const rowCtx = {};
+      cols.forEach((col, ci) => {
+        if (col.type === 'formula') return;
+        const raw = rows[rowIndex] != null ? rows[rowIndex][ci] : null;
+        if (col.type === 'number')        rowCtx[col.name] = raw != null && raw !== '' ? Number(raw) : 0;
+        else if (col.type === 'checkbox') rowCtx[col.name] = raw === true || raw === 'true' || raw === 1;
+        else                              rowCtx[col.name] = raw != null ? raw : '';
+      });
+      // Aggregate helpers over all rows for a named column
+      function colNums(n) {
+        const ci = cols.findIndex(c => c.name === n);
+        return ci < 0 ? [] : rows.map(r => r ? (Number(r[ci]) || 0) : 0);
+      }
+      const SUM   = n => colNums(n).reduce((a, b) => a + b, 0);
+      const AVG   = n => { const v = colNums(n); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : 0; };
+      const COUNT = n => { const ci = cols.findIndex(c=>c.name===n); return ci<0 ? rows.length : rows.filter(r=>r&&r[ci]!=null&&r[ci]!=='').length; };
+      const MIN   = n => { const v = colNums(n); return v.length ? Math.min(...v) : 0; };
+      const MAX   = n => { const v = colNums(n); return v.length ? Math.max(...v) : 0; };
+      const IF    = (cond, a, b) => cond ? a : b;
+      const ROUND = (v, d=2) => Math.round(v * 10**d) / 10**d;
+      try {
+        const bindings = Object.entries(rowCtx)
+          .filter(([k]) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k))
+          .map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`)
+          .join('\n');
+        // new Function is safe here: user's own data in a local desktop app
+        const fn = new Function('SUM','AVG','COUNT','MIN','MAX','IF','ROUND',
+          `${bindings}\nreturn (${expr});`);
+        const result = fn(SUM, AVG, COUNT, MIN, MAX, IF, ROUND);
+        if (result == null || result === '') return '';
+        if (typeof result === 'number') return Number.isFinite(result) ? String(Math.round(result*100)/100) : '#ERR';
+        return String(result);
+      } catch { return '#ERR'; }
+    }
+
+    // -------------------------------------------------------------------------
     // buildTableNodeView — interactive table inside a codeBlock NodeView
     // -------------------------------------------------------------------------
     function buildTableNodeView(node, editor, getPos) {
@@ -151,7 +199,8 @@
       }
 
       let currentJson = node.textContent.trim();
-      let addingColumn = false; // tracks inline add-column form visibility
+      let addingColumn = false;     // tracks inline add-column form visibility
+      let editingFormulaCol = null; // index of formula column whose expr is being edited
 
       function getData() {
         try { return JSON.parse(currentJson); }
@@ -186,30 +235,71 @@
 
         data.schema.columns.forEach((col, ci) => {
           const th = document.createElement('th');
-          const inner = document.createElement('div');
-          inner.className = 'gtable-th-inner';
 
-          const label = document.createElement('span');
-          label.textContent = col.name;
-          inner.appendChild(label);
-
-          const tag = document.createElement('span');
-          tag.className = 'gtable-type-tag';
-          tag.textContent = col.type || 'text';
-          inner.appendChild(tag);
-
-          const del = document.createElement('button');
-          del.className = 'gtable-th-del';
-          del.textContent = '×';
-          del.title = 'Delete column';
-          del.onclick = () => {
-            const d = getData();
-            d.schema.columns.splice(ci, 1);
-            d.rows.forEach(r => r.splice(ci, 1));
-            commitData(d);
-          };
-          inner.appendChild(del);
-          th.appendChild(inner);
+          if (col.type === 'formula' && editingFormulaCol === ci) {
+            // Inline expression editor
+            const form = document.createElement('div');
+            form.className = 'gtable-addcol-form';
+            const exprInput = document.createElement('input');
+            exprInput.className = 'gtable-addcol-input';
+            exprInput.style.width = '160px';
+            exprInput.type = 'text';
+            exprInput.value = col.expr || '';
+            exprInput.placeholder = 'hours * 75';
+            requestAnimationFrame(() => exprInput.focus());
+            const okBtn = document.createElement('button');
+            okBtn.className = 'gtable-addcol-ok';
+            okBtn.textContent = '✓';
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'gtable-addcol-cancel';
+            cancelBtn.textContent = '×';
+            const doEdit = () => {
+              const d = getData();
+              d.schema.columns[ci] = { ...d.schema.columns[ci], expr: exprInput.value.trim() };
+              editingFormulaCol = null;
+              commitData(d);
+            };
+            exprInput.onkeydown = e => {
+              if (e.key === 'Enter') { e.preventDefault(); doEdit(); }
+              if (e.key === 'Escape') { editingFormulaCol = null; render(); }
+            };
+            okBtn.onclick = doEdit;
+            cancelBtn.onclick = () => { editingFormulaCol = null; render(); };
+            form.appendChild(exprInput);
+            form.appendChild(okBtn);
+            form.appendChild(cancelBtn);
+            th.appendChild(form);
+          } else {
+            const inner = document.createElement('div');
+            inner.className = 'gtable-th-inner';
+            const label = document.createElement('span');
+            label.textContent = col.name;
+            inner.appendChild(label);
+            const tag = document.createElement('span');
+            tag.className = 'gtable-type-tag';
+            if (col.type === 'formula') {
+              const short = col.expr ? (col.expr.length > 14 ? col.expr.slice(0,14)+'…' : col.expr) : '…';
+              tag.textContent = `=${short}`;
+              tag.style.cursor = 'pointer';
+              tag.title = col.expr ? `Edit: ${col.expr}` : 'Click to set formula';
+              tag.onclick = () => { editingFormulaCol = ci; render(); };
+            } else {
+              tag.textContent = col.type || 'text';
+            }
+            inner.appendChild(tag);
+            const del = document.createElement('button');
+            del.className = 'gtable-th-del';
+            del.textContent = '×';
+            del.title = 'Delete column';
+            del.onclick = () => {
+              const d = getData();
+              d.schema.columns.splice(ci, 1);
+              d.rows.forEach(r => r.splice(ci, 1));
+              commitData(d);
+            };
+            inner.appendChild(del);
+            th.appendChild(inner);
+          }
           hrow.appendChild(th);
         });
 
@@ -241,6 +331,15 @@
             typeSelect.appendChild(opt);
           });
 
+          const exprInput = document.createElement('input');
+          exprInput.className = 'gtable-addcol-input';
+          exprInput.type = 'text';
+          exprInput.placeholder = 'e.g. hours * 75';
+          exprInput.style.display = 'none';
+          typeSelect.onchange = () => {
+            exprInput.style.display = typeSelect.value === 'formula' ? '' : 'none';
+          };
+
           const okBtn = document.createElement('button');
           okBtn.className = 'gtable-addcol-ok';
           okBtn.textContent = 'Add';
@@ -253,7 +352,11 @@
             const name = nameInput.value.trim();
             if (!name) { nameInput.focus(); return; }
             const d = getData();
-            d.schema.columns.push({ name, type: typeSelect.value });
+            const colDef = { name, type: typeSelect.value };
+            if (typeSelect.value === 'formula' && exprInput.value.trim()) {
+              colDef.expr = exprInput.value.trim();
+            }
+            d.schema.columns.push(colDef);
             d.rows.forEach(r => r.push(null));
             commitData(d); // resets addingColumn and re-renders
           };
@@ -262,11 +365,16 @@
             if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
             if (e.key === 'Escape') { addingColumn = false; render(); }
           };
+          exprInput.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+            if (e.key === 'Escape') { addingColumn = false; render(); }
+          };
           okBtn.onclick = doAdd;
           cancelBtn.onclick = () => { addingColumn = false; render(); };
 
           form.appendChild(nameInput);
           form.appendChild(typeSelect);
+          form.appendChild(exprInput);
           form.appendChild(okBtn);
           form.appendChild(cancelBtn);
           thAdd.appendChild(form);
@@ -300,9 +408,19 @@
 
             } else if (colType === 'formula') {
               const span = document.createElement('span');
-              span.className = 'gtable-formula-cell';
-              span.textContent = (val != null && val !== '')
-                ? String(val) : (col.expr ? `=${col.expr}` : '');
+              const computed = evaluateFormula(col.expr, ri, data.schema.columns, data.rows);
+              if (computed === '#ERR') {
+                span.className = 'gtable-formula-cell gtable-formula-err';
+                span.textContent = '#ERR';
+                span.title = `Expression: ${col.expr || ''}`;
+              } else if (computed !== '') {
+                span.className = 'gtable-formula-cell';
+                span.textContent = computed;
+              } else {
+                span.className = 'gtable-formula-cell gtable-formula-placeholder';
+                span.textContent = col.expr ? `=${col.expr}` : '=';
+                span.title = 'Click column header tag to set formula';
+              }
               td.appendChild(span);
 
             } else {
