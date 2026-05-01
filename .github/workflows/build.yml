@@ -26,7 +26,7 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
 
-  # ── Release build + MSIX package ─────────────────────────────────────────
+  # ── Release build + installers ───────────────────────────────────────────
   build:
     name: Build (Windows x64)
     runs-on: windows-latest
@@ -44,16 +44,28 @@ jobs:
       - name: Build release binary
         run: cargo build --release -p glitch
 
+      - name: Build Inno Setup installer (GlitchSetup.exe)
+        shell: pwsh
+        run: |
+          winget install --id JRSoftware.InnoSetup --silent --accept-source-agreements --accept-package-agreements
+          $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          & $iscc packaging\inno\glitch.iss
+
       - name: Package MSIX
         shell: pwsh
-        # MSIX_CERT_PFX / MSIX_CERT_PASSWORD are optional GitHub secrets.
-        # When absent, build-msix.ps1 generates a self-signed dev cert.
         env:
           MSIX_CERT_PFX: ${{ secrets.MSIX_CERT_PFX }}
           MSIX_CERT_PASSWORD: ${{ secrets.MSIX_CERT_PASSWORD }}
         run: .\packaging\msix\build-msix.ps1 -SkipBuild
 
-      # Upload both artifacts on every successful build.
+      # Upload artifacts on every successful build.
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GlitchSetup
+          path: target/GlitchSetup.exe
+          if-no-files-found: error
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -68,11 +80,12 @@ jobs:
           path: target/glitch.msix
           if-no-files-found: error
 
-      # When triggered by a GitHub Release, attach both to the release.
+      # When triggered by a GitHub Release, attach all three to the release.
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            target/GlitchSetup.exe
             target/release/glitch.exe
             target/glitch.msix
