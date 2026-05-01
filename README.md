@@ -90,4 +90,4 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - [x] M5 — Embeddings + cosine-similarity "Related" tab (`fastembed` BGE-small-en-v1.5)
 - [x] M6 — Graph view (force-directed layout, typed edges, filter chips, pan/zoom)
 - [x] M7 — Article extractor (`dom_smoothie` + `htmd`; `/extract <url>` slash command + toolbar dialog)
-- [ ] M8 — MSIX packaging (`winappCli`)
+- [x] M8 — MSIX packaging (`makeappx` + `signtool`; self-signed dev cert; local + CI)
