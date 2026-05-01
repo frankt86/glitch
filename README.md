@@ -73,6 +73,8 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - **Note types & templates** — register types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
 - **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
 - **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface
+- **Graph view** — force-directed layout of all notes; typed edges (wikilink, frontmatter related, hierarchy, shared keyword); filter chips; pan and zoom
+- **Article extractor** — paste any URL via "Extract URL…" toolbar button or `/extract <url>`; fetches readable content via `dom_smoothie` + `htmd`, saves as a note with frontmatter (`source`, `author`, `fetched`)
 - **CI/CD** — GitHub Actions builds and uploads `glitch.exe` on every push to `main`; attaches the binary to GitHub Releases automatically
 
 ## Roadmap
@@ -86,6 +88,6 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - [x] M3 — TipTap WYSIWYG editor with markdown formatting commands and gap-cursor table navigation
 - [x] M4 — Interactive table grid (sort, filter, typed columns, formulas)
 - [x] M5 — Embeddings + cosine-similarity "Related" tab (`fastembed` BGE-small-en-v1.5)
-- [ ] M6 — Graph view (petgraph + fdg, typed edges)
-- [ ] M7 — Article extractor (`dom_smoothie` + `htmd`)
+- [x] M6 — Graph view (force-directed layout, typed edges, filter chips, pan/zoom)
+- [x] M7 — Article extractor (`dom_smoothie` + `htmd`; `/extract <url>` slash command + toolbar dialog)
 - [ ] M8 — MSIX packaging (`winappCli`)

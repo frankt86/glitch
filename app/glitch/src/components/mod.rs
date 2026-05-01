@@ -1,6 +1,7 @@
 mod app;
 mod chat_panel;
 mod editor;
+mod extractor;
 mod graph_view;
 mod permission_modal;
 mod settings_panel;

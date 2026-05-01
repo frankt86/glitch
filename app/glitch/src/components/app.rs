@@ -2,6 +2,7 @@ use crate::chat::{chat_coroutine, check_claude_available, pick_vault_dir};
 use crate::commands::{try_parse, CommandContext, CommandOutcome};
 use crate::components::chat_panel::ChatPanel;
 use crate::components::editor::Editor;
+use crate::components::extractor::ExtractorDialog;
 use crate::components::graph_view::GraphView;
 use crate::components::permission_modal::PermissionModal;
 use crate::components::settings_panel::SettingsPanel;
@@ -49,6 +50,7 @@ pub fn App() -> Element {
     let app_settings = use_signal(settings::load);
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
+    let extractor_visible = use_signal(|| false);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -250,6 +252,14 @@ pub fn App() -> Element {
                 button {
                     class: "btn",
                     onclick: {
+                        let mut extractor_visible = extractor_visible;
+                        move |_| extractor_visible.set(true)
+                    },
+                    "Extract URL…"
+                }
+                button {
+                    class: "btn",
+                    onclick: {
                         let mut graph_visible = graph_visible;
                         move |_| graph_visible.set(true)
                     },
@@ -297,6 +307,7 @@ pub fn App() -> Element {
             PermissionModal { pending: pending_approvals, on_decision }
             SettingsPanel { visible: settings_visible, settings: app_settings }
             GraphView { visible: graph_visible, state: app_state }
+            ExtractorDialog { visible: extractor_visible, state: app_state }
         }
     }
 }
