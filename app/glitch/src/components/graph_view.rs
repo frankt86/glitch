@@ -73,7 +73,11 @@ fn build_graph(vault: &Vault) -> GraphData {
         .map(|n| GNode { id: n.id.as_str().to_string(), title: n.title.clone() })
         .collect();
 
-    let idx: HashMap<&str, usize> = nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
+    // Normalize separators to '/' so wikilinks (always '/') match Windows paths (always '\').
+    let idx: HashMap<String, usize> = nodes.iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str().replace('\\', "/"), i))
+        .collect();
     let mut edges: Vec<GEdge> = Vec::new();
     let mut seen: HashSet<(usize, usize, u8)> = HashSet::new();
 
@@ -88,7 +92,7 @@ fn build_graph(vault: &Vault) -> GraphData {
         // ── Wikilinks ────────────────────────────────────────────────────────
         if let Ok(content) = note.read_content() {
             for target in extract_wikilinks(&content) {
-                if let Some(&j) = find_by_name(&idx, notes, &target) {
+                if let Some(j) = find_by_name(&idx, notes, &target) {
                     if j != i { push(&mut edges, i, j, EdgeKind::Wikilink); }
                 }
             }
@@ -96,8 +100,9 @@ fn build_graph(vault: &Vault) -> GraphData {
 
         // ── Frontmatter `related:` ────────────────────────────────────────
         for rel in &note.frontmatter.related {
-            if let Some(&j) = idx.get(rel.as_str())
-                .or_else(|| idx.get(format!("{rel}.md").as_str()))
+            let rel_fwd = rel.replace('\\', "/");
+            if let Some(&j) = idx.get(&rel_fwd)
+                .or_else(|| idx.get(&format!("{rel_fwd}.md")))
             {
                 if j != i { push(&mut edges, i, j, EdgeKind::Related); }
             }
@@ -158,26 +163,28 @@ fn extract_wikilinks(content: &str) -> Vec<String> {
     out
 }
 
-fn find_by_name<'a>(
-    idx: &'a HashMap<&str, usize>,
-    notes: &[Note],
-    name: &str,
-) -> Option<&'a usize> {
-    let name_lower = name.to_lowercase();
-    idx.get(name)
-        .or_else(|| idx.get(format!("{name}.md").as_str()))
+fn find_by_name(idx: &HashMap<String, usize>, notes: &[Note], name: &str) -> Option<usize> {
+    // Normalize to forward slashes (wikilinks use '/', Windows vault paths use '\')
+    let name_fwd = name.replace('\\', "/");
+    let name_lower = name_fwd.to_lowercase();
+    // The filename component only (after the last '/'), for stem/title matching
+    let stem_lower = name_lower.rsplit('/').next().unwrap_or(&name_lower).to_string();
+
+    idx.get(&name_fwd)
+        .or_else(|| idx.get(&format!("{name_fwd}.md")))
         .or_else(|| {
-            // file-stem match (case-insensitive)
+            // file-stem match — compare only the filename stem, not the full path
             let pos = notes.iter().position(|n| {
-                n.id.0.file_stem().map(|s| s.to_lowercase()) == Some(name_lower.clone())
+                n.id.0.file_stem().map(|s| s.to_lowercase()) == Some(stem_lower.clone())
             })?;
-            idx.get(notes[pos].id.as_str())
+            idx.get(&notes[pos].id.as_str().replace('\\', "/"))
         })
         .or_else(|| {
             // title match (case-insensitive) — handles [[My Note]] → my-note.md
-            let pos = notes.iter().position(|n| n.title.to_lowercase() == name_lower)?;
-            idx.get(notes[pos].id.as_str())
+            let pos = notes.iter().position(|n| n.title.to_lowercase() == stem_lower)?;
+            idx.get(&notes[pos].id.as_str().replace('\\', "/"))
         })
+        .copied()
 }
 
 // ── Force-directed layout (Fruchterman–Reingold) ──────────────────────────────

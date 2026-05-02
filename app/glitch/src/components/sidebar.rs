@@ -13,16 +13,21 @@ pub fn Sidebar(
     on_create_folder: EventHandler<String>,
     on_move_note: EventHandler<(String, String)>,
 ) -> Element {
-    // Dioxus's ondragover runs asynchronously; inject a native sync listener so
-    // WebView2 sees preventDefault() in time and shows the correct drop cursor.
+    // Dioxus's ondragover is async — by the time it calls preventDefault() WebView2
+    // has already decided "no drop". Fix: inject a native synchronous JS listener
+    // via spawn+eval so it's registered before any drag interaction.
     use_effect(|| {
-        let _ = document::eval(
-            "if (!window.__glitchDragFix) { window.__glitchDragFix = true; \
-             document.addEventListener('dragover', function(e) { \
-                 e.preventDefault(); \
-                 if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; \
-             }, false); }",
-        );
+        spawn(async move {
+            document::eval(
+                "if (!window.__glitchDragFix) { window.__glitchDragFix = true; \
+                 document.addEventListener('dragover', function(e) { \
+                     e.preventDefault(); \
+                     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; \
+                 }, false); }",
+            )
+            .await
+            .ok();
+        });
     });
 
     let tree_memo = use_memo(move || {
