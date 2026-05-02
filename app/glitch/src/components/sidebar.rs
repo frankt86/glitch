@@ -269,7 +269,7 @@ pub fn Sidebar(
                         ondrop: move |_| {
                             is_root_drag_over.set(false);
                             spawn(async move {
-                                let mut ev = document::eval("dioxus.send(window.__glitch_drag||'')");
+                                let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
                                 let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
                                 let note_id = js_id.or_else(|| dragging_note.read().clone());
                                 if let Some(id) = note_id {
@@ -330,7 +330,7 @@ fn FolderRow(
                     is_drag_over.set(false);
                     let fp = folder_path_drop.clone();
                     spawn(async move {
-                        let mut ev = document::eval("dioxus.send(window.__glitch_drag||'')");
+                        let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
                         let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
                         let note_id = js_id.or_else(|| dragging_note.read().clone());
                         if let Some(id) = note_id {

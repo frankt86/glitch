@@ -126,15 +126,21 @@ pub fn ChatPanel(
                             is_listening.set(true);
                             spawn(async move {
                                 let script = r#"
-                                    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-                                    if (!R) { dioxus.send(''); return; }
-                                    const r = new R();
-                                    r.lang = 'en-US';
-                                    r.interimResults = false;
-                                    r.maxAlternatives = 1;
-                                    r.onresult = e => dioxus.send(e.results[0][0].transcript);
-                                    r.onerror = () => dioxus.send('');
-                                    r.start();
+                                    (async function() {
+                                        try {
+                                            const s = await navigator.mediaDevices.getUserMedia({audio:true});
+                                            s.getTracks().forEach(t => t.stop());
+                                        } catch(e) { dioxus.send(''); return; }
+                                        const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+                                        if (!R) { dioxus.send(''); return; }
+                                        const r = new R();
+                                        r.lang = 'en-US';
+                                        r.interimResults = false;
+                                        r.maxAlternatives = 1;
+                                        r.onresult = e => dioxus.send(e.results[0][0].transcript);
+                                        r.onerror = () => dioxus.send('');
+                                        r.start();
+                                    })();
                                 "#;
                                 let mut eval = document::eval(script);
                                 if let Ok(t) = eval.recv::<String>().await {

@@ -90,7 +90,9 @@ fn main() {
                     "<style>{STYLES}</style>\
                      <script>\
                      window.__glitch_drag=null;\
+                     window.__glitch_drop_id=null;\
                      document.addEventListener('dragstart',function(e){{\
+                         window.__glitch_drop_id=null;\
                          var el=e.target&&e.target.closest?e.target.closest('[data-note-id]'):null;\
                          window.__glitch_drag=el?el.getAttribute('data-note-id'):null;\
                      }},true);\
@@ -106,6 +108,8 @@ fn main() {
                      }},true);\
                      document.addEventListener('drop',function(e){{\
                          e.preventDefault();\
+                         window.__glitch_drop_id=window.__glitch_drag;\
+                         window.__glitch_drag=null;\
                      }},true);\
                      </script>"
                 ))
