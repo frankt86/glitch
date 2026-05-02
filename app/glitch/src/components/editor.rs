@@ -353,6 +353,15 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     let mut note_has_leading_h1 = use_signal(|| false);
     let mut related_state = use_signal(|| RelatedState::Idle);
 
+    // Debounced auto-save: any dirty change triggers a 1.5s coalesced write.
+    let save_tx = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
+        while rx.recv().await.is_ok() {
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+            while rx.try_recv().is_ok() {}
+            save_current(&mut state);
+        }
+    });
+
     let title = state
         .read()
         .current_note()
@@ -432,6 +441,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 };
                                 s.editor_content = join_frontmatter(&yaml, &body);
                                 s.editor_dirty = true;
+                                drop(s);
+                                save_tx.send(());
                             }
                         }
                         Some("tiptap-ready") => {
@@ -663,6 +674,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 };
                                 s.editor_content = join_frontmatter(&new_yaml, &new_body);
                                 s.editor_dirty = true;
+                                drop(s);
+                                save_tx.send(());
                             }
                         }
                     }
@@ -879,6 +892,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                     let mut s = state.write();
                                     s.editor_content = evt.value();
                                     s.editor_dirty = true;
+                                    drop(s);
+                                    save_tx.send(());
                                     palette_index.set(0);
                                 }
                             },

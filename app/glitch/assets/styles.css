@@ -79,6 +79,7 @@ html, body, #main {
     background: var(--bg-elevated);
     overflow-y: auto;
     overflow-x: hidden;
+    min-width: 0;
 }
 
 .sidebar-header {
@@ -196,6 +197,7 @@ html, body, #main {
     border-radius: 8px;
 }
 .tree-folder { font-weight: 500; }
+.tree-folder.drag-over { background: var(--accent-bg); outline: 1px solid var(--accent); }
 .tree-note { font-weight: 400; }
 
 /* editor */
@@ -328,6 +330,7 @@ html, body, #main {
     flex-direction: column;
     background: var(--bg-elevated);
     overflow: hidden;
+    min-width: 0;
 }
 
 .chat-header {

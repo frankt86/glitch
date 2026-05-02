@@ -5,11 +5,13 @@ use dioxus::prelude::*;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
 use std::collections::HashSet;
 
-/// (title, note_type) — note_type is empty string for "no type / plain note"
+/// (title, note_type, folder) — folder is vault-relative, empty for root
 #[component]
 pub fn Sidebar(
     state: Signal<AppState>,
-    on_create_note: EventHandler<(String, String)>,
+    on_create_note: EventHandler<(String, String, String)>,
+    on_create_folder: EventHandler<String>,
+    on_move_note: EventHandler<(String, String)>,
 ) -> Element {
     let tree = state
         .read()
@@ -31,7 +33,11 @@ pub fn Sidebar(
     let mut new_note_open = use_signal(|| false);
     let mut new_note_title = use_signal(String::new);
     let mut new_note_type = use_signal(String::new);
+    let mut new_note_folder = use_signal(String::new);
+    let mut new_folder_open = use_signal(|| false);
+    let mut new_folder_name = use_signal(String::new);
     let mut search_query = use_signal(String::new);
+    let dragging_note: Signal<Option<String>> = use_signal(|| None);
     let has_vault = state.read().vault.is_some();
 
     let current = state.read().current_note.clone();
@@ -44,16 +50,17 @@ pub fn Sidebar(
             return;
         }
         let note_type = new_note_type.read().clone();
-        on_create_note.call((title, note_type));
+        let folder = new_note_folder.read().trim().to_string();
+        on_create_note.call((title, note_type, folder));
         new_note_title.set(String::new());
         new_note_type.set(String::new());
+        new_note_folder.set(String::new());
         new_note_open.set(false);
     };
 
     let query = search_query.read().trim().to_lowercase();
     let searching = !query.is_empty();
 
-    // Flat list of matching notes for search mode (flattened from the already-built tree)
     let search_results: Vec<NoteRef> = if searching {
         tree.as_ref()
             .map(|t| {
@@ -81,12 +88,25 @@ pub fn Sidebar(
                         if !next {
                             new_note_title.set(String::new());
                             new_note_type.set(String::new());
+                            new_note_folder.set(String::new());
                         }
+                        new_folder_open.set(false);
                     },
                     "+ New"
                 }
+                button {
+                    class: "sidebar-newbtn",
+                    disabled: !has_vault,
+                    title: "New folder",
+                    onclick: move |_| {
+                        let next = !*new_folder_open.read();
+                        new_folder_open.set(next);
+                        if !next { new_folder_name.set(String::new()); }
+                        new_note_open.set(false);
+                    },
+                    "📁"
+                }
             }
-            // ── Search box ───────────────────────────────────────────────────
             if has_vault {
                 div { class: "sidebar-search-wrap",
                     input {
@@ -104,6 +124,44 @@ pub fn Sidebar(
                     }
                 }
             }
+            if *new_folder_open.read() {
+                div { class: "new-note-form",
+                    input {
+                        class: "new-note-input",
+                        autofocus: true,
+                        placeholder: "folder name…",
+                        value: "{new_folder_name.read()}",
+                        oninput: move |evt: FormEvent| new_folder_name.set(evt.value()),
+                        onkeydown: move |evt: KeyboardEvent| {
+                            if evt.key() == Key::Enter {
+                                evt.prevent_default();
+                                let name = new_folder_name.read().trim().to_string();
+                                if !name.is_empty() {
+                                    on_create_folder.call(name);
+                                    new_folder_name.set(String::new());
+                                    new_folder_open.set(false);
+                                }
+                            } else if evt.key() == Key::Escape {
+                                evt.prevent_default();
+                                new_folder_name.set(String::new());
+                                new_folder_open.set(false);
+                            }
+                        }
+                    }
+                    button {
+                        class: "btn btn-primary",
+                        onclick: move |_| {
+                            let name = new_folder_name.read().trim().to_string();
+                            if !name.is_empty() {
+                                on_create_folder.call(name);
+                                new_folder_name.set(String::new());
+                                new_folder_open.set(false);
+                            }
+                        },
+                        "Create folder"
+                    }
+                }
+            }
             if *new_note_open.read() {
                 div { class: "new-note-form",
                     input {
@@ -116,6 +174,7 @@ pub fn Sidebar(
                             let mut new_note_open = new_note_open;
                             let mut new_note_title = new_note_title;
                             let mut new_note_type = new_note_type;
+                            let mut new_note_folder = new_note_folder;
                             let on_create_note = on_create_note;
                             move |evt: KeyboardEvent| {
                                 if evt.key() == Key::Enter {
@@ -123,15 +182,18 @@ pub fn Sidebar(
                                     let title = new_note_title.read().trim().to_string();
                                     if !title.is_empty() {
                                         let note_type = new_note_type.read().clone();
-                                        on_create_note.call((title, note_type));
+                                        let folder = new_note_folder.read().trim().to_string();
+                                        on_create_note.call((title, note_type, folder));
                                         new_note_title.set(String::new());
                                         new_note_type.set(String::new());
+                                        new_note_folder.set(String::new());
                                         new_note_open.set(false);
                                     }
                                 } else if evt.key() == Key::Escape {
                                     evt.prevent_default();
                                     new_note_title.set(String::new());
                                     new_note_type.set(String::new());
+                                    new_note_folder.set(String::new());
                                     new_note_open.set(false);
                                 }
                             }
@@ -151,12 +213,17 @@ pub fn Sidebar(
                             }
                         }
                     }
+                    input {
+                        class: "new-note-input",
+                        placeholder: "folder (optional)…",
+                        value: "{new_note_folder.read()}",
+                        oninput: move |evt: FormEvent| new_note_folder.set(evt.value()),
+                    }
                     button { class: "btn btn-primary", onclick: submit, "Create" }
                 }
             }
             div { class: "tree",
                 if searching {
-                    // ── Search results (flat list) ────────────────────────────
                     if search_results.is_empty() {
                         div { class: "sidebar-search-empty", "No notes match" }
                     }
@@ -167,10 +234,10 @@ pub fn Sidebar(
                             depth: 0u32,
                             current: current.clone(),
                             state,
+                            dragging_note,
                         }
                     }
                 } else if let Some(t) = tree {
-                    // ── Normal tree ───────────────────────────────────────────
                     for note in t.notes.iter() {
                         NoteRow {
                             key: "{note.id.as_str()}",
@@ -178,6 +245,7 @@ pub fn Sidebar(
                             depth: 0u32,
                             current: current.clone(),
                             state,
+                            dragging_note,
                         }
                     }
                     for folder in t.folders.iter() {
@@ -188,6 +256,8 @@ pub fn Sidebar(
                             current: current.clone(),
                             expanded,
                             state,
+                            dragging_note,
+                            on_move_note,
                         }
                     }
                 }
@@ -203,21 +273,42 @@ fn FolderRow(
     current: Option<NoteId>,
     expanded: Signal<HashSet<String>>,
     state: Signal<AppState>,
+    dragging_note: Signal<Option<String>>,
+    on_move_note: EventHandler<(String, String)>,
 ) -> Element {
     let is_open = expanded.read().contains(&folder.path);
     let chevron = if is_open { "▾" } else { "▸" };
     let indent = format!("padding-left: {}px", depth * 12 + 6);
     let path = folder.path.clone();
+    let mut is_drag_over = use_signal(|| false);
+
+    let folder_path_drop = folder.path.clone();
 
     rsx! {
         div {
-            class: "tree-row tree-folder",
+            class: if *is_drag_over.read() { "tree-row tree-folder drag-over" } else { "tree-row tree-folder" },
             style: "{indent}",
             onclick: move |_| {
                 let mut e = expanded;
                 let mut set = e.write();
                 if !set.insert(path.clone()) {
                     set.remove(&path);
+                }
+            },
+            ondragover: move |evt| {
+                evt.prevent_default();
+            },
+            ondragenter: move |_| is_drag_over.set(true),
+            ondragleave: move |_| is_drag_over.set(false),
+            ondrop: {
+                let folder_path_drop = folder_path_drop.clone();
+                move |_| {
+                    is_drag_over.set(false);
+                    let note_rel_opt = dragging_note.read().clone();
+                    if let Some(note_rel) = note_rel_opt {
+                        dragging_note.set(None);
+                        on_move_note.call((note_rel, folder_path_drop.clone()));
+                    }
                 }
             },
             span { class: "tree-chevron", "{chevron}" }
@@ -234,6 +325,8 @@ fn FolderRow(
                     current: current.clone(),
                     expanded,
                     state,
+                    dragging_note,
+                    on_move_note,
                 }
             }
             for note in folder.notes.iter() {
@@ -243,6 +336,7 @@ fn FolderRow(
                     depth: depth + 1,
                     current: current.clone(),
                     state,
+                    dragging_note,
                 }
             }
         }
@@ -255,22 +349,30 @@ fn NoteRow(
     depth: u32,
     current: Option<NoteId>,
     state: Signal<AppState>,
+    dragging_note: Signal<Option<String>>,
 ) -> Element {
     let active = current.as_ref() == Some(&note.id);
     let class = if active { "tree-row tree-note active" } else { "tree-row tree-note" };
     let indent = format!("padding-left: {}px", depth * 12 + 22);
     let id = note.id.clone();
     let kw_count = note.keywords.len();
+    let note_rel = note.id.as_str().to_string();
 
     rsx! {
         div {
             class: "{class}",
             style: "{indent}",
+            draggable: "true",
             title: if kw_count > 0 {
                 format!("{} keyword(s): {}", kw_count, note.keywords.join(", "))
             } else {
                 String::new()
             },
+            ondragstart: {
+                let note_rel = note_rel.clone();
+                move |_| dragging_note.set(Some(note_rel.clone()))
+            },
+            ondragend: move |_| dragging_note.set(None),
             onclick: {
                 let id = id.clone();
                 let mut state = state;

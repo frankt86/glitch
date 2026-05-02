@@ -72,7 +72,10 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - **Frontmatter detail tab** — structured fields per note type (article, meeting, book, person, project); editable title pinned above the editor
 - **Note types & templates** — built-in types: note, task, meeting, book, person, project, bible (SOAP method), sermon, prayer, daily journal, recipe, research, goal, quote; register custom types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
 - **Sidebar search** — live title search above the note tree; filters across all folders in real time; clear button to restore the tree
-- **Resizable sidebar** — drag the divider between the note list and editor to set any width from 160 px to 520 px
+- **Resizable sidebar** — drag the divider between the note list and editor to set any width from 160 px to 520 px; collapse the notes panel or the Claude panel with the ⊣/⊢ buttons in the topbar
+- **Persistent vault** — last-opened vault auto-reopens on next launch; vault path saved to `%APPDATA%\Glitch\settings.json`
+- **Auto-save** — edits are debounced and written to disk ~1.5 s after the last keystroke; the file watcher picks up the write and refreshes the graph so wikilink edges appear automatically
+- **Folder management** — create folders via the 📁 button in the sidebar; optionally specify a folder when creating a new note; drag notes onto folders to move them
 - **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
 - **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface
 - **Graph view** — full-screen force-directed layout of all notes; typed edges (wikilink, frontmatter related, hierarchy, shared keyword); filter chips; pan and zoom; click any node to open that note in the editor

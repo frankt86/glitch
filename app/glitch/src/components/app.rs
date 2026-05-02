@@ -53,6 +53,8 @@ pub fn App() -> Element {
     let extractor_visible = use_signal(|| false);
     let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
+    let mut sidebar_collapsed = use_signal(|| false);
+    let mut chat_collapsed = use_signal(|| false);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -128,6 +130,42 @@ pub fn App() -> Element {
         watch_coroutine(rx, app_state).await;
     });
 
+    // Auto-open the last used vault on startup.
+    use_future({
+        let mut app_state = app_state;
+        let chat_tx = chat_tx.clone();
+        let sync_tx = sync_tx.clone();
+        let watch_tx = watch_tx.clone();
+        let runtime_sig = permission_runtime;
+        move || async move {
+            let last_vault = app_settings.read().last_vault.clone();
+            if let Some(path) = last_vault {
+                let root = Utf8PathBuf::from(path);
+                if root.exists() {
+                    match Vault::load(&root) {
+                        Ok(vault) => {
+                            let root_path = vault.root.clone();
+                            app_state.write().vault = Some(vault);
+                            app_state.write().current_note = None;
+                            app_state.write().editor_content.clear();
+                            app_state.write().editor_dirty = false;
+                            let config = build_session_config(&runtime_sig, app_settings);
+                            chat_tx.send(ChatCommand::StartSession {
+                                root: root_path.clone(),
+                                config,
+                            });
+                            sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
+                            watch_tx.send(root_path);
+                        }
+                        Err(err) => {
+                            tracing::warn!("failed to auto-open last vault: {err}");
+                        }
+                    }
+                }
+            }
+        }
+    });
+
     let open_vault = {
         let mut app_state = app_state;
         let chat_tx = chat_tx.clone();
@@ -146,6 +184,7 @@ pub fn App() -> Element {
                 match Vault::load(&root) {
                     Ok(vault) => {
                         let root_path = vault.root.clone();
+                        settings::save_last_vault(root_path.as_str());
                         app_state.write().vault = Some(vault);
                         app_state.write().current_note = None;
                         app_state.write().editor_content.clear();
@@ -167,11 +206,11 @@ pub fn App() -> Element {
         }
     };
 
-    // Sidebar "+ New" button → create a note (with optional type/template).
+    // Sidebar "+ New" button → create a note (with optional type/template/folder).
     let create_new_note = {
         let mut app_state = app_state;
         let mut history = chat_history;
-        move |(title, note_type): (String, String)| {
+        move |(title, note_type, folder): (String, String, String)| {
             let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) else {
                 history
                     .write()
@@ -179,10 +218,10 @@ pub fn App() -> Element {
                 return;
             };
             let result = if note_type.is_empty() {
-                vault_actions::create_note(&root, &title)
+                vault_actions::create_note(&root, &folder, &title)
             } else {
                 let body = settings::render_template(&note_type, &title);
-                vault_actions::create_note_from_template(&root, &title, &body)
+                vault_actions::create_note_from_template(&root, &folder, &title, &body)
             };
             match result {
                 Ok(created) => {
@@ -208,6 +247,47 @@ pub fn App() -> Element {
                     history
                         .write()
                         .push(ChatEntry::Error(format!("failed to create note: {err}")));
+                }
+            }
+        }
+    };
+
+    let on_create_folder = {
+        let app_state = app_state;
+        let mut history = chat_history;
+        move |name: String| {
+            if let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) {
+                if let Err(err) = vault_actions::create_folder(&root, &name) {
+                    history.write().push(ChatEntry::Error(format!("failed to create folder: {err}")));
+                }
+            }
+        }
+    };
+
+    let on_move_note = {
+        let mut app_state = app_state;
+        let mut history = chat_history;
+        move |(note_rel, target_folder): (String, String)| {
+            let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) else { return };
+            match vault_actions::move_note(&root, &note_rel, &target_folder) {
+                Ok(()) => {
+                    let mut s = app_state.write();
+                    if s.current_note.as_ref().map(|c| c.as_str()) == Some(note_rel.as_str()) {
+                        let filename = std::path::Path::new(&note_rel)
+                            .file_name()
+                            .and_then(|f| f.to_str())
+                            .unwrap_or("note.md")
+                            .to_string();
+                        let new_rel = if target_folder.is_empty() {
+                            filename
+                        } else {
+                            format!("{target_folder}/{filename}")
+                        };
+                        s.current_note = Some(glitch_core::NoteId::from_relative(new_rel));
+                    }
+                }
+                Err(err) => {
+                    history.write().push(ChatEntry::Error(format!("failed to move note: {err}")));
                 }
             }
         }
@@ -245,6 +325,10 @@ pub fn App() -> Element {
         .map(|v| v.root.to_string())
         .unwrap_or_else(|| "no vault".into());
 
+    let sidebar_w = if *sidebar_collapsed.read() { 0.0f32 } else { *sidebar_width.read() };
+    let resize_w = if *sidebar_collapsed.read() { 0 } else { 5 };
+    let chat_w: u32 = if *chat_collapsed.read() { 0 } else { 380 };
+
     rsx! {
         div {
             class: "app",
@@ -258,6 +342,15 @@ pub fn App() -> Element {
 
             header { class: "topbar",
                 div { class: "brand", "Glitch" }
+                button {
+                    class: "btn",
+                    title: if *sidebar_collapsed.read() { "Show notes panel" } else { "Hide notes panel" },
+                    onclick: move |_| {
+                        let c = !*sidebar_collapsed.read();
+                        sidebar_collapsed.set(c);
+                    },
+                    if *sidebar_collapsed.read() { "⊢" } else { "⊣" }
+                }
                 button { class: "btn", onclick: open_vault, "Open vault…" }
                 div { class: "vault-path", "{vault_path_label}" }
                 button {
@@ -286,11 +379,25 @@ pub fn App() -> Element {
                 }
                 SyncBadge { state: sync_state, on_sync: trigger_sync }
                 ClaudeBadge { status: claude_status, session: session_status }
+                button {
+                    class: "btn",
+                    title: if *chat_collapsed.read() { "Show Claude panel" } else { "Hide Claude panel" },
+                    onclick: move |_| {
+                        let c = !*chat_collapsed.read();
+                        chat_collapsed.set(c);
+                    },
+                    if *chat_collapsed.read() { "⊣" } else { "⊢" }
+                }
             }
             main {
                 class: "workspace",
-                style: "grid-template-columns: {*sidebar_width.read()}px 5px 1fr 380px",
-                Sidebar { state: app_state, on_create_note: create_new_note }
+                style: "grid-template-columns: {sidebar_w}px {resize_w}px 1fr {chat_w}px",
+                Sidebar {
+                    state: app_state,
+                    on_create_note: create_new_note,
+                    on_create_folder,
+                    on_move_note,
+                }
                 div {
                     class: "sidebar-resize-handle",
                     onmousedown: move |evt| {
@@ -402,7 +509,7 @@ fn handle_send(
                 }
                 CommandOutcome::LocalCreate { title, note_type, vault_root } => {
                     let body = settings::render_template(&note_type, &title);
-                    match vault_actions::create_note_from_template(&vault_root, &title, &body) {
+                    match vault_actions::create_note_from_template(&vault_root, "", &title, &body) {
                         Ok(created) => {
                             let id = glitch_core::NoteId(created.relative_path.clone());
                             let content = std::fs::read_to_string(&created.absolute_path)

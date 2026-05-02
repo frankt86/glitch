@@ -232,6 +232,9 @@ pub struct AppSettings {
     /// for Claude). NOT in the vault — this is agent config.
     #[serde(default = "default_agent_instructions")]
     pub agent_instructions_path: Utf8PathBuf,
+    /// Last vault opened — auto-reopened on next launch.
+    #[serde(default)]
+    pub last_vault: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -244,6 +247,7 @@ impl Default for AppSettings {
             commit_chats_to_git: false,
             commit_embeddings_to_git: false,
             agent_instructions_path: default_agent_instructions(),
+            last_vault: None,
         }
     }
 }
@@ -296,6 +300,15 @@ pub fn save(settings: &AppSettings) -> io::Result<()> {
     let json = serde_json::to_string_pretty(settings)?;
     std::fs::write(&path, json)?;
     Ok(())
+}
+
+/// Persist `last_vault` without clobbering other settings.
+pub fn save_last_vault(path: &str) {
+    let mut settings = load();
+    settings.last_vault = Some(path.to_string());
+    if let Err(err) = save(&settings) {
+        tracing::warn!("failed to save last_vault: {err}");
+    }
 }
 
 /// Ensure the agent instructions file exists with a default starter template.
