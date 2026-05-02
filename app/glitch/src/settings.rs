@@ -59,10 +59,18 @@ pub fn load_types() -> Vec<NoteTypeConfig> {
 
 fn default_note_types() -> Vec<NoteTypeConfig> {
     vec![
-        NoteTypeConfig { name: "meeting".into(), emoji: "🗓".into(), template: "meeting.md".into() },
-        NoteTypeConfig { name: "book".into(),    emoji: "📚".into(), template: "book.md".into() },
-        NoteTypeConfig { name: "person".into(),  emoji: "👤".into(), template: "person.md".into() },
-        NoteTypeConfig { name: "project".into(), emoji: "🚀".into(), template: "project.md".into() },
+        NoteTypeConfig { name: "meeting".into(),  emoji: "🗓".into(),  template: "meeting.md".into() },
+        NoteTypeConfig { name: "book".into(),      emoji: "📚".into(),  template: "book.md".into() },
+        NoteTypeConfig { name: "person".into(),    emoji: "👤".into(),  template: "person.md".into() },
+        NoteTypeConfig { name: "project".into(),   emoji: "🚀".into(),  template: "project.md".into() },
+        NoteTypeConfig { name: "bible".into(),     emoji: "📖".into(),  template: "bible.md".into() },
+        NoteTypeConfig { name: "sermon".into(),    emoji: "🎙️".into(), template: "sermon.md".into() },
+        NoteTypeConfig { name: "prayer".into(),    emoji: "🙏".into(),  template: "prayer.md".into() },
+        NoteTypeConfig { name: "journal".into(),   emoji: "📓".into(),  template: "journal.md".into() },
+        NoteTypeConfig { name: "recipe".into(),    emoji: "🍳".into(),  template: "recipe.md".into() },
+        NoteTypeConfig { name: "research".into(),  emoji: "🔬".into(),  template: "research.md".into() },
+        NoteTypeConfig { name: "goal".into(),      emoji: "🎯".into(),  template: "goal.md".into() },
+        NoteTypeConfig { name: "quote".into(),     emoji: "💬".into(),  template: "quote.md".into() },
     ]
 }
 
@@ -145,11 +153,44 @@ template = "project.md"
         std::fs::write(&config_path, toml_content)?;
     }
 
+    // Append any new types that don't yet appear in the existing file.
+    // This lets existing installs pick up new types without overwriting customisations.
+    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+    let new_types = [
+        ("bible",    "📖",  "bible.md"),
+        ("sermon",   "🎙️", "sermon.md"),
+        ("prayer",   "🙏",  "prayer.md"),
+        ("journal",  "📓",  "journal.md"),
+        ("recipe",   "🍳",  "recipe.md"),
+        ("research", "🔬",  "research.md"),
+        ("goal",     "🎯",  "goal.md"),
+        ("quote",    "💬",  "quote.md"),
+    ];
+    let mut appended = existing.clone();
+    for (name, emoji, tmpl) in &new_types {
+        if !existing.contains(&format!("name = \"{name}\"")) {
+            appended.push_str(&format!(
+                "\n[[type]]\nname = \"{name}\"\nemoji = \"{emoji}\"\ntemplate = \"{tmpl}\"\n"
+            ));
+        }
+    }
+    if appended != existing {
+        std::fs::write(&config_path, appended)?;
+    }
+
     let templates: &[(&str, &str)] = &[
         ("meeting.md", "---\ntitle: \"{{title}}\"\ntype: meeting\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Date:** {{date}}  \n**Attendees:**  \n\n## Agenda\n\n## Notes\n\n## Action items\n\n- [ ] \n"),
         ("book.md",    "---\ntitle: \"{{title}}\"\ntype: book\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Author:**  \n**Started:** {{date}}  \n**Finished:**  \n\n## Summary\n\n## Key ideas\n\n## Quotes\n\n## My take\n\n"),
         ("person.md",  "---\ntitle: \"{{title}}\"\ntype: person\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Role:**  \n**Contact:**  \n\n## Notes\n\n## Meetings\n\n"),
         ("project.md", "---\ntitle: \"{{title}}\"\ntype: project\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Status:** active  \n**Started:** {{date}}  \n\n## Goal\n\n## Tasks\n\n- [ ] \n\n## Notes\n\n"),
+        ("bible.md",   "---\ntitle: \"{{title}}\"\ntype: bible\nbook: \nchapter: \nverses: \ndate: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Book:** &nbsp; **Chapter:** &nbsp; **Verses:**\n\n## Scripture\n\n> (Paste the verse(s) here)\n\n## Observation\n*What does the text say? (facts, repeated words, who/what/when/where)*\n\n## Application\n*How does this apply to my life today?*\n\n## Prayer\n\n"),
+        ("sermon.md",  "---\ntitle: \"{{title}}\"\ntype: sermon\nspeaker: \nseries: \nscripture: \ndate: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Speaker:** &nbsp; **Date:** {{date}}  \n**Series:** &nbsp; **Scripture:**\n\n## Main Point\n\n## Outline\n\n1. \n2. \n3. \n\n## Key Quotes\n\n## Application\n\n- [ ] \n\n## Notes\n\n"),
+        ("prayer.md",  "---\ntitle: \"{{title}}\"\ntype: prayer\ndate: {{date}}\nstatus: active\ntags: []\n---\n\n# {{title}}\n\n**Date:** {{date}} &nbsp; **Status:** active\n\n## Request\n*What are you bringing before God?*\n\n## Scripture\n*A verse to stand on:*\n\n## How God Answered\n\n**Date answered:**\n\n## Praise & Thanksgiving\n\n"),
+        ("journal.md", "---\ntitle: \"{{title}}\"\ntype: journal\ndate: {{date}}\nmood: \ntags: []\n---\n\n# {{title}}\n\n**Date:** {{date}} &nbsp; **Mood:**\n\n## Today's Highlight\n\n## Gratitude\n\n1. \n2. \n3. \n\n## Reflection\n*What's on my mind?*\n\n## Tomorrow's Focus\n\n- [ ] \n\n"),
+        ("recipe.md",  "---\ntitle: \"{{title}}\"\ntype: recipe\nservings: \nprep_time: \ncook_time: \nrating: \ndate: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Servings:** &nbsp; **Prep:** &nbsp; **Cook:** &nbsp; **Rating:** /5\n\n## Ingredients\n\n- \n\n## Instructions\n\n1. \n\n## Notes & Variations\n\n## Source\n\n"),
+        ("research.md","---\ntitle: \"{{title}}\"\ntype: research\ndate: {{date}}\nstatus: in-progress\ntags: []\n---\n\n# {{title}}\n\n**Status:** in-progress &nbsp; **Started:** {{date}}\n\n## Question / Hypothesis\n\n## Sources\n\n- \n\n## Key Findings\n\n## Summary\n\n## Open Questions\n\n- \n\n"),
+        ("goal.md",    "---\ntitle: \"{{title}}\"\ntype: goal\ndate: {{date}}\ntarget_date: \nstatus: active\ntags: []\n---\n\n# {{title}}\n\n**Status:** active &nbsp; **Started:** {{date}} &nbsp; **Target:**\n\n## Why This Matters\n\n## Success Criteria\n\n- [ ] \n\n## Milestones\n\n- [ ] \n\n## Progress Log\n\n"),
+        ("quote.md",   "---\ntitle: \"{{title}}\"\ntype: quote\nauthor: \nsource: \ndate: {{date}}\ntags: []\n---\n\n# {{title}}\n\n> (The quote)\n\n— **Author:** &nbsp; **Source:**\n\n## Context\n\n## Why It Resonates\n\n## Related Notes\n\n"),
     ];
     for (filename, content) in templates {
         let path = tmpl_dir.join(filename);
@@ -270,6 +311,8 @@ GitHub or leak between machines.
 
 - New notes go in the vault root unless the user specifies a folder.
 - Frontmatter on every note: `title`, `created`, `tags`.
+- Tags MUST use inline YAML array format: `tags: [tag1, tag2, tag3]`
+  Never use the YAML block list format with dashes.
 - Use `[[wikilinks]]` to reference other notes by their relative path.
 
 ## Your tools

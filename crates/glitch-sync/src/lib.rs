@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::process::Stdio;
 use thiserror::Error;
 use tokio::process::Command;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Error)]
 pub enum SyncError {
@@ -48,12 +50,14 @@ impl SyncStatus {
 
 /// Returns true if `git --version` runs.
 pub async fn is_git_available() -> bool {
-    Command::new("git")
-        .arg("--version")
+    let mut cmd = Command::new("git");
+    cmd.arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.status()
         .await
         .map(|s| s.success())
         .unwrap_or(false)
@@ -123,10 +127,13 @@ pub async fn sync(path: &Utf8Path, commit_message: &str) -> Result<SyncStatus, S
 }
 
 async fn run_git(cwd: &Utf8Path, args: &[&str]) -> Result<String, SyncError> {
-    let output = Command::new("git")
-        .args(args)
+    let mut cmd = Command::new("git");
+    cmd.args(args)
         .current_dir(cwd.as_std_path())
-        .stdin(Stdio::null())
+        .stdin(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd
         .output()
         .await
         .map_err(|e| match e.kind() {

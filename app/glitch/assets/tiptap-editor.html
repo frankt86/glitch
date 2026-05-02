@@ -25,6 +25,7 @@
     .ProseMirror li { margin: 2px 0; }
     .ProseMirror hr { border: none; border-top: 1px solid #262a36; margin: 16px 0; }
     .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #8a8f9d; pointer-events: none; float: left; height: 0; }
+    .ProseMirror img { max-width: 100%; height: auto; display: block; margin: 8px 0; border-radius: 4px; }
 
     /* ── Gap cursor (click between block nodes like tables) ── */
     .ProseMirror-gapcursor { display: none; pointer-events: none; position: absolute; }
@@ -134,6 +135,7 @@
     import { Editor } from 'https://esm.sh/@tiptap/core@2';
     import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
     import CodeBlock from 'https://esm.sh/@tiptap/extension-code-block@2';
+    import Image from 'https://esm.sh/@tiptap/extension-image@2';
     import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
     import { Gapcursor } from 'https://esm.sh/@tiptap/extension-gapcursor@2';
     import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
@@ -520,6 +522,7 @@
       extensions: [
         StarterKit.configure({ codeBlock: false }),
         GlitchCodeBlock,
+        Image.configure({ allowBase64: true, inline: false }),
         Gapcursor,
         Placeholder.configure({ placeholder }),
         Markdown.configure({
@@ -571,22 +574,25 @@
         const defaultJson = JSON.stringify(
           { schema: { columns: [{ name: 'Name', type: 'text' }] }, rows: [] }, null, 2
         );
-        editor.chain().focus().insertContent({
-          type: 'codeBlock',
-          attrs: { language: 'glitch-table' },
-          content: [{ type: 'text', text: defaultJson }],
-        }).run();
-        // Ensure a paragraph after the table so the cursor has somewhere to go
-        if (editor.isActive('codeBlock')) {
-          editor.commands.createParagraphNear();
-        }
-        // If the table is now the first node in the doc, prepend an empty paragraph
-        // so the gap cursor has a landing spot above it
-        const firstChild = editor.state.doc.firstChild;
-        if (firstChild && firstChild.type.name === 'codeBlock' && firstChild.attrs.language === 'glitch-table') {
-          const { tr, schema } = editor.state;
-          editor.view.dispatch(tr.insert(1, schema.nodes.paragraph.create()));
-        }
+        // Always insert: blank line + table + blank line, placed after the current block.
+        // Inserting in reverse order at the same position gives [para, table, para].
+        editor.commands.command(({ tr, state, dispatch }) => {
+          const { schema, selection } = state;
+          const { $from } = selection;
+          const para      = schema.nodes.paragraph.create();
+          const tableNode = schema.nodes.codeBlock.create(
+            { language: 'glitch-table' },
+            schema.text(defaultJson)
+          );
+          if (dispatch) {
+            const pos = $from.depth >= 1 ? $from.after(1) : state.doc.content.size;
+            // Insert trailing para first, then table, then leading para — all at
+            // the same pos so they land in order: [leading][table][trailing].
+            const t = tr.insert(pos, para).insert(pos, tableNode).insert(pos, para);
+            dispatch(t);
+          }
+          return true;
+        });
 
       } else if (d.type === 'format-command') {
         // Clear the /command text the user typed, then apply the format.

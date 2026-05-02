@@ -9,7 +9,7 @@ use crate::components::settings_panel::SettingsPanel;
 use crate::components::sidebar::Sidebar;
 use crate::extract;
 use crate::permissions::{self, PendingApproval, PermissionEvent};
-use crate::settings;
+use crate::settings::{self, AppSettings};
 use crate::state::{
     AppState, ChatCommand, ChatEntry, ClaudeStatus, SessionStatus, SyncCommand, SyncState,
 };
@@ -149,7 +149,7 @@ pub fn App() -> Element {
                         app_state.write().editor_content.clear();
                         app_state.write().editor_dirty = false;
 
-                        let config = build_session_config(&runtime_sig);
+                        let config = build_session_config(&runtime_sig, app_settings);
                         chat_tx.send(ChatCommand::StartSession {
                             root: root_path.clone(),
                             config,
@@ -312,13 +312,20 @@ pub fn App() -> Element {
     }
 }
 
-fn build_session_config(runtime: &Signal<Option<PermissionRuntime>>) -> SessionConfig {
+fn build_session_config(
+    runtime: &Signal<Option<PermissionRuntime>>,
+    settings: Signal<AppSettings>,
+) -> SessionConfig {
     let read = runtime.read();
+    let s = settings.read();
+    let system_prompt =
+        std::fs::read_to_string(s.agent_instructions_path.as_std_path()).ok();
     let mut cfg = SessionConfig {
-        // Read-only safe tools auto-approve. Anything else triggers the modal.
-        allowed_tools: Some("Read,Glob,Grep,LS,TodoWrite".into()),
+        allowed_tools: Some(s.allowed_tools_silent.clone()),
+        system_prompt_append: system_prompt,
         ..Default::default()
     };
+    drop(s);
     if let Some(rt) = read.as_ref() {
         if let Some(path) = &rt.mcp_config_path {
             cfg.mcp_config = Some(path.to_string());

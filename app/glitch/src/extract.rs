@@ -1,10 +1,11 @@
 //! Article-to-note extractor. Runs **inside Glitch** (not via Claude) so it
 //! works regardless of the local Claude environment's network sandbox.
 //!
-//! Pipeline: reqwest → dom_smoothie::Readability → htmd → markdown with
-//! frontmatter. Robots.txt is intentionally not consulted — same posture as
-//! Pocket / Reader / Obsidian Web Clipper for personal-use single-page fetches.
+//! Pipeline: reqwest → dom_smoothie::Readability → image embed (base64) →
+//! htmd → markdown with frontmatter. Images are embedded as base64 data URLs
+//! so notes remain readable even if the source page disappears.
 
+use base64::Engine as _;
 use camino::{Utf8Path, Utf8PathBuf};
 use jiff::Timestamp;
 use std::fmt;
@@ -55,8 +56,8 @@ pub struct ExtractedNote {
     pub title: String,
 }
 
-/// Fetch `url`, extract the readable article, write it as a markdown note
-/// under `<vault_root>/articles/<slug>.md`, and return the new path.
+/// Fetch `url`, extract the readable article, embed images as base64 data URLs,
+/// and write it as a markdown note under `<vault_root>/articles/<slug>.md`.
 pub async fn extract_to_vault(
     url: &str,
     vault_root: &Utf8Path,
@@ -67,10 +68,12 @@ pub async fn extract_to_vault(
 
     let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
         .build()?;
+
     let resp = client.get(url).send().await?.error_for_status()?;
     let html = resp.text().await?;
+    let html = promote_lazy_images(html);
 
     let mut readable = dom_smoothie::Readability::new(html.as_str(), Some(url), None)
         .map_err(|e| ExtractError::Readability(e.to_string()))?;
@@ -84,14 +87,19 @@ pub async fn extract_to_vault(
     } else {
         title_raw
     };
-    let content_str = article.content.to_string();
-    let body_md = htmd::convert(&content_str)
-        .map_err(|e| ExtractError::Conversion(e.to_string()))?;
 
     let slug = slugify(&title);
     let articles_dir = vault_root.join("articles");
     tokio::fs::create_dir_all(articles_dir.as_std_path()).await?;
 
+    // Download images and embed as base64 data URLs so the note is self-contained.
+    let content_html = article.content.to_string();
+    let content_html = embed_images_base64(content_html, &client).await;
+
+    let body_md = htmd::convert(&content_html)
+        .map_err(|e| ExtractError::Conversion(e.to_string()))?;
+
+    // Resolve note path, avoiding collisions with a numeric suffix.
     let mut path = articles_dir.join(format!("{slug}.md"));
     let mut suffix = 1;
     while path.exists() {
@@ -110,9 +118,9 @@ pub async fn extract_to_vault(
         .as_ref()
         .map(|s| s.to_string().trim().to_string())
         .unwrap_or_default();
+
     let frontmatter = build_frontmatter(&title, url, &now, &byline, &excerpt);
     let document = format!("{frontmatter}\n# {title}\n\n{body_md}\n");
-
     tokio::fs::write(path.as_std_path(), document).await?;
 
     let relative = path
@@ -125,6 +133,103 @@ pub async fn extract_to_vault(
         title,
     })
 }
+
+// ─── Image embedding ──────────────────────────────────────────────────────────
+
+/// Download every image referenced in the HTML and replace `src` attributes
+/// with `data:<mime>;base64,<data>` so the note is fully self-contained.
+/// Images that fail to download keep their original remote URL.
+async fn embed_images_base64(html: String, client: &reqwest::Client) -> String {
+    let srcs = extract_img_srcs(&html);
+    if srcs.is_empty() {
+        return html;
+    }
+
+    let mut result = html;
+    for src in srcs {
+        if src.starts_with("data:") {
+            continue; // already embedded
+        }
+        match fetch_as_data_url(client, &src).await {
+            Ok(data_url) => {
+                result = result.replace(src.as_str(), data_url.as_str());
+            }
+            Err(err) => {
+                tracing::warn!("image download failed ({src}): {err}");
+            }
+        }
+    }
+    result
+}
+
+async fn fetch_as_data_url(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?;
+
+    let mime = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .split(';')
+        .next()
+        .unwrap_or("image/jpeg")
+        .trim()
+        .to_string();
+
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
+/// Pull all `src` attribute values from `<img>` tags in the HTML.
+fn extract_img_srcs(html: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut rest = html;
+    while let Some(pos) = rest.find("<img") {
+        rest = &rest[pos + 4..];
+        let tag_end = rest.find('>').unwrap_or(rest.len());
+        let tag = &rest[..tag_end];
+        if let Some(src) = attr_value(tag, "src") {
+            if !src.is_empty() {
+                urls.push(src);
+            }
+        }
+    }
+    urls
+}
+
+/// Extract the value of `name="..."` or `name='...'` from an HTML attribute string.
+fn attr_value(attrs: &str, name: &str) -> Option<String> {
+    for quote in ['"', '\''] {
+        let pattern = format!("{name}={quote}");
+        if let Some(start) = attrs.find(&pattern) {
+            let after = &attrs[start + pattern.len()..];
+            if let Some(end) = after.find(quote) {
+                return Some(after[..end].to_string());
+            }
+        }
+    }
+    None
+}
+
+// ─── HTML pre-processing ──────────────────────────────────────────────────────
+
+/// Promote lazy-load image attributes to standard `src` so Readability and
+/// htmd see real URLs instead of empty placeholders.
+fn promote_lazy_images(html: String) -> String {
+    html.replace(" data-src=", " src=")
+        .replace(" data-lazy-src=", " src=")
+        .replace(" data-original=", " src=")
+        .replace(" data-lazy=", " src=")
+}
+
+// ─── Frontmatter + slugify ────────────────────────────────────────────────────
 
 fn build_frontmatter(title: &str, source: &str, fetched: &str, byline: &str, excerpt: &str) -> String {
     let mut s = String::from("---\n");
@@ -144,7 +249,6 @@ fn build_frontmatter(title: &str, source: &str, fetched: &str, byline: &str, exc
 }
 
 fn yaml_scalar(s: &str) -> String {
-    // Conservative: always quote and escape backslashes/quotes.
     let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }

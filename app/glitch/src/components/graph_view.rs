@@ -263,12 +263,14 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
     let mut show_keyword   = use_signal(|| false);
 
     // ── Pan / zoom state ─────────────────────────────────────────────────────
-    let mut pan_x    = use_signal(|| 0.0f32);
-    let mut pan_y    = use_signal(|| 0.0f32);
-    let mut zoom     = use_signal(|| 1.0f32);
-    let mut dragging = use_signal(|| false);
-    let mut last_mx  = use_signal(|| 0.0f32);
-    let mut last_my  = use_signal(|| 0.0f32);
+    let mut pan_x      = use_signal(|| 0.0f32);
+    let mut pan_y      = use_signal(|| 0.0f32);
+    let mut zoom       = use_signal(|| 1.0f32);
+    let mut dragging   = use_signal(|| false);
+    let mut last_mx    = use_signal(|| 0.0f32);
+    let mut last_my    = use_signal(|| 0.0f32);
+    let mut down_mx    = use_signal(|| 0.0f32);  // mousedown origin for drag threshold
+    let mut down_my    = use_signal(|| 0.0f32);
 
     // ── Build graph (memoised — recomputes only when vault changes) ───────────
     let graph = use_memo(move || {
@@ -388,8 +390,12 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
                         fill: "transparent",
                         onmousedown: move |evt| {
                             let c = evt.data().client_coordinates();
-                            last_mx.set(c.x as f32);
-                            last_my.set(c.y as f32);
+                            let mx = c.x as f32;
+                            let my = c.y as f32;
+                            last_mx.set(mx);
+                            last_my.set(my);
+                            down_mx.set(mx);
+                            down_my.set(my);
                             dragging.set(true);
                         },
                         onmousemove: move |evt| {
@@ -397,7 +403,10 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
                             let c = evt.data().client_coordinates();
                             let mx = c.x as f32;
                             let my = c.y as f32;
-                            // Read old values before calling set (avoids borrow/set conflict)
+                            // Only pan if moved more than 4px from the mousedown origin
+                            let dx = mx - *down_mx.read();
+                            let dy = my - *down_my.read();
+                            if dx * dx + dy * dy < 16.0 { return; }
                             let old_px = *pan_x.read();
                             let old_py = *pan_y.read();
                             let old_lx = *last_mx.read();

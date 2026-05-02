@@ -20,6 +20,15 @@ use std::borrow::Cow;
 
 const STYLES: &str = include_str!("../assets/styles.css");
 const TIPTAP_HTML: &[u8] = include_bytes!("../assets/tiptap-editor.html");
+const APP_ICON_PNG: &[u8] = include_bytes!("../assets/glitch_icon_512.png");
+
+fn load_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
+    let img = image::load_from_memory_with_format(APP_ICON_PNG, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    let (w, h) = img.dimensions();
+    dioxus::desktop::tao::window::Icon::from_rgba(img.into_raw(), w, h).ok()
+}
 
 fn main() {
     // When Claude Code re-invokes us as the MCP permission server, divert
@@ -61,7 +70,8 @@ fn main() {
 
     let window = WindowBuilder::new()
         .with_title("Glitch")
-        .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 800.0));
+        .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 800.0))
+        .with_window_icon(load_window_icon());
 
     // WebView2 needs a writable user-data folder. When installed to
     // Program Files the exe directory is read-only, so point it at

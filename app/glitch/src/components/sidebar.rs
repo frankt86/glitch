@@ -31,6 +31,7 @@ pub fn Sidebar(
     let mut new_note_open = use_signal(|| false);
     let mut new_note_title = use_signal(String::new);
     let mut new_note_type = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let has_vault = state.read().vault.is_some();
 
     let current = state.read().current_note.clone();
@@ -47,6 +48,23 @@ pub fn Sidebar(
         new_note_title.set(String::new());
         new_note_type.set(String::new());
         new_note_open.set(false);
+    };
+
+    let query = search_query.read().trim().to_lowercase();
+    let searching = !query.is_empty();
+
+    // Flat list of matching notes for search mode (flattened from the already-built tree)
+    let search_results: Vec<NoteRef> = if searching {
+        tree.as_ref()
+            .map(|t| {
+                flatten_refs(t)
+                    .into_iter()
+                    .filter(|n| n.title.to_lowercase().contains(&query))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
     };
 
     rsx! {
@@ -66,6 +84,24 @@ pub fn Sidebar(
                         }
                     },
                     "+ New"
+                }
+            }
+            // ── Search box ───────────────────────────────────────────────────
+            if has_vault {
+                div { class: "sidebar-search-wrap",
+                    input {
+                        class: "sidebar-search",
+                        placeholder: "Search notes…",
+                        value: "{search_query.read()}",
+                        oninput: move |evt: FormEvent| search_query.set(evt.value()),
+                    }
+                    if searching {
+                        button {
+                            class: "sidebar-search-clear",
+                            onclick: move |_| search_query.set(String::new()),
+                            "×"
+                        }
+                    }
                 }
             }
             if *new_note_open.read() {
@@ -119,7 +155,22 @@ pub fn Sidebar(
                 }
             }
             div { class: "tree",
-                if let Some(t) = tree {
+                if searching {
+                    // ── Search results (flat list) ────────────────────────────
+                    if search_results.is_empty() {
+                        div { class: "sidebar-search-empty", "No notes match" }
+                    }
+                    for note in search_results.iter() {
+                        NoteRow {
+                            key: "{note.id.as_str()}",
+                            note: note.clone(),
+                            depth: 0u32,
+                            current: current.clone(),
+                            state,
+                        }
+                    }
+                } else if let Some(t) = tree {
+                    // ── Normal tree ───────────────────────────────────────────
                     for note in t.notes.iter() {
                         NoteRow {
                             key: "{note.id.as_str()}",
@@ -232,6 +283,14 @@ fn NoteRow(
             }
         }
     }
+}
+
+fn flatten_refs(folder: &TreeFolder) -> Vec<NoteRef> {
+    let mut out = folder.notes.clone();
+    for sub in &folder.folders {
+        out.extend(flatten_refs(sub));
+    }
+    out
 }
 
 fn load_note(state: &mut Signal<AppState>, id: NoteId) {

@@ -7,6 +7,8 @@ use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 use tokio_util::codec::{FramedRead, LinesCodec};
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Error)]
 pub enum ClaudeError {
@@ -44,6 +46,8 @@ pub struct SessionConfig {
     pub mcp_config: Option<String>,
     /// Tool name like `mcp__glitch_permissions__approve`.
     pub permission_prompt_tool: Option<String>,
+    /// Text appended to Claude's system prompt (agent instructions).
+    pub system_prompt_append: Option<String>,
 }
 
 impl ClaudeClient {
@@ -54,12 +58,14 @@ impl ClaudeClient {
     /// Quick check: is `claude --version` runnable? Used at startup to decide
     /// whether to show the setup screen.
     pub async fn is_available(&self) -> bool {
-        Command::new(&self.binary)
-            .arg("--version")
+        let mut cmd = Command::new(&self.binary);
+        cmd.arg("--version")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.status()
             .await
             .map(|s| s.success())
             .unwrap_or(false)
@@ -100,12 +106,17 @@ impl ClaudeClient {
         if let Some(tool) = &config.permission_prompt_tool {
             cmd.args(["--permission-prompt-tool", tool]);
         }
+        if let Some(sp) = &config.system_prompt_append {
+            cmd.args(["--append-system-prompt", sp]);
+        }
 
         cmd.current_dir(working_dir.as_std_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
 
         let mut child = cmd.spawn().map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => ClaudeError::NotInstalled,

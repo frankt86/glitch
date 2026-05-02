@@ -37,4 +37,9 @@ notify.workspace = true
 reqwest.workspace = true
 dom_smoothie.workspace = true
 htmd.workspace = true
+base64.workspace = true
+image.workspace = true
 jiff.workspace = true
+
+[build-dependencies]
+winres = "0.1"
