@@ -68,14 +68,14 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - **WYSIWYG markdown editor** powered by TipTap v2 — headings, bold, italic, strike, code, blockquote, lists, dividers
 - **Slash commands** — type `/` anywhere in the editor or chat to get an autocomplete palette; formatting commands apply instantly, action commands (note, extract, explain, connect) go to the AI
 - **Inline data tables** — `glitch-table` fenced blocks render as interactive grids with sortable columns, typed cells (text, number, date, checkbox, select, formula), and inline add/delete; gap-cursor lets you click above or below a table to place the cursor there
-- **Streaming AI chat** — Claude Code CLI runs as a subprocess in `stream-json` mode; tool-use blocks surface as expandable cards; the AI always sees which note is open
+- **Streaming AI chat** — Claude Code CLI runs as a subprocess in `stream-json` mode; tool-use blocks surface as expandable cards; the AI always sees which note is open; hover any Claude text response to reveal a 🔊 button that reads it aloud via the Web Speech API
 - **Frontmatter detail tab** — structured fields per note type (article, meeting, book, person, project); editable title pinned above the editor
 - **Note types & templates** — built-in types: note, task, meeting, book, person, project, bible (SOAP method), sermon, prayer, daily journal, recipe, research, goal, quote; register custom types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
 - **Sidebar search** — live title search above the note tree; filters across all folders in real time; clear button to restore the tree
 - **Resizable sidebar** — drag the divider between the note list and editor to set any width from 160 px to 520 px; collapse the notes panel or the Claude panel with the ⊣/⊢ buttons in the topbar
 - **Persistent vault** — last-opened vault auto-reopens on next launch; vault path saved to `%APPDATA%\Glitch\settings.json`
 - **Auto-save** — edits are debounced and written to disk ~1.5 s after the last keystroke; the file watcher picks up the write and refreshes the graph so wikilink edges appear automatically
-- **Folder management** — create folders via the 📁 button in the sidebar; optionally specify a folder when creating a new note; drag notes onto folders to move them (WebView2 drop cursor fixed)
+- **Folder management** — create folders via the 📁 button in the sidebar; drag notes onto folders to move them; drag to the "↑ move to root" zone at the bottom of the tree to un-nest a note; hover a folder to reveal a 🗑 button that deletes the folder and moves its notes to the parent
 - **Sub-notes** — add `parent: other-note.md` (or bare title) to a note's frontmatter; the parent note shows a ▸/▾ chevron in the sidebar and expands to reveal its children
 - **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
 - **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface

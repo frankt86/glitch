@@ -12,24 +12,8 @@ pub fn Sidebar(
     on_create_note: EventHandler<(String, String, String)>,
     on_create_folder: EventHandler<String>,
     on_move_note: EventHandler<(String, String)>,
+    on_delete_folder: EventHandler<String>,
 ) -> Element {
-    // Dioxus's ondragover is async — by the time it calls preventDefault() WebView2
-    // has already decided "no drop". Fix: inject a native synchronous JS listener
-    // via spawn+eval so it's registered before any drag interaction.
-    use_effect(|| {
-        spawn(async move {
-            document::eval(
-                "if (!window.__glitchDragFix) { window.__glitchDragFix = true; \
-                 document.addEventListener('dragover', function(e) { \
-                     e.preventDefault(); \
-                     if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; \
-                 }, false); }",
-            )
-            .await
-            .ok();
-        });
-    });
-
     let tree_memo = use_memo(move || {
         state.read().vault.as_ref().map(|v| TreeFolder::build(&v.notes, default_emoji))
     });
@@ -54,11 +38,11 @@ pub fn Sidebar(
     let mut new_note_open = use_signal(|| false);
     let mut new_note_title = use_signal(String::new);
     let mut new_note_type = use_signal(String::new);
-    let mut new_note_folder = use_signal(String::new);
     let mut new_folder_open = use_signal(|| false);
     let mut new_folder_name = use_signal(String::new);
     let mut search_query = use_signal(String::new);
-    let dragging_note: Signal<Option<String>> = use_signal(|| None);
+    let mut dragging_note: Signal<Option<String>> = use_signal(|| None);
+    let mut is_root_drag_over: Signal<bool> = use_signal(|| false);
     let has_vault = state.read().vault.is_some();
 
     let current = state.read().current_note.clone();
@@ -71,11 +55,9 @@ pub fn Sidebar(
             return;
         }
         let note_type = new_note_type.read().clone();
-        let folder = new_note_folder.read().trim().to_string();
-        on_create_note.call((title, note_type, folder));
+        on_create_note.call((title, note_type, String::new()));
         new_note_title.set(String::new());
         new_note_type.set(String::new());
-        new_note_folder.set(String::new());
         new_note_open.set(false);
     };
 
@@ -109,7 +91,6 @@ pub fn Sidebar(
                         if !next {
                             new_note_title.set(String::new());
                             new_note_type.set(String::new());
-                            new_note_folder.set(String::new());
                         }
                         new_folder_open.set(false);
                     },
@@ -195,7 +176,6 @@ pub fn Sidebar(
                             let mut new_note_open = new_note_open;
                             let mut new_note_title = new_note_title;
                             let mut new_note_type = new_note_type;
-                            let mut new_note_folder = new_note_folder;
                             let on_create_note = on_create_note;
                             move |evt: KeyboardEvent| {
                                 if evt.key() == Key::Enter {
@@ -203,18 +183,15 @@ pub fn Sidebar(
                                     let title = new_note_title.read().trim().to_string();
                                     if !title.is_empty() {
                                         let note_type = new_note_type.read().clone();
-                                        let folder = new_note_folder.read().trim().to_string();
-                                        on_create_note.call((title, note_type, folder));
+                                        on_create_note.call((title, note_type, String::new()));
                                         new_note_title.set(String::new());
                                         new_note_type.set(String::new());
-                                        new_note_folder.set(String::new());
                                         new_note_open.set(false);
                                     }
                                 } else if evt.key() == Key::Escape {
                                     evt.prevent_default();
                                     new_note_title.set(String::new());
                                     new_note_type.set(String::new());
-                                    new_note_folder.set(String::new());
                                     new_note_open.set(false);
                                 }
                             }
@@ -233,12 +210,6 @@ pub fn Sidebar(
                                 }
                             }
                         }
-                    }
-                    input {
-                        class: "new-note-input",
-                        placeholder: "folder (optional)…",
-                        value: "{new_note_folder.read()}",
-                        oninput: move |evt: FormEvent| new_note_folder.set(evt.value()),
                     }
                     button { class: "btn btn-primary", onclick: submit, "Create" }
                 }
@@ -283,9 +254,27 @@ pub fn Sidebar(
                             state,
                             dragging_note,
                             on_move_note,
+                            on_delete_folder,
                             child_map,
                             expanded_notes,
                         }
+                    }
+                }
+                if has_vault {
+                    div {
+                        class: if *is_root_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
+                        ondragover: move |evt| evt.prevent_default(),
+                        ondragenter: move |_| is_root_drag_over.set(true),
+                        ondragleave: move |_| is_root_drag_over.set(false),
+                        ondrop: move |_| {
+                            is_root_drag_over.set(false);
+                            let note_rel_opt = dragging_note.read().clone();
+                            if let Some(note_rel) = note_rel_opt {
+                                dragging_note.set(None);
+                                on_move_note.call((note_rel, String::new()));
+                            }
+                        },
+                        "↑ move to root"
                     }
                 }
             }
@@ -302,6 +291,7 @@ fn FolderRow(
     state: Signal<AppState>,
     dragging_note: Signal<Option<String>>,
     on_move_note: EventHandler<(String, String)>,
+    on_delete_folder: EventHandler<String>,
     child_map: ReadOnlySignal<HashMap<String, Vec<NoteRef>>>,
     expanded_notes: Signal<HashSet<String>>,
 ) -> Element {
@@ -312,6 +302,7 @@ fn FolderRow(
     let mut is_drag_over = use_signal(|| false);
 
     let folder_path_drop = folder.path.clone();
+    let folder_path_delete = folder.path.clone();
 
     rsx! {
         div {
@@ -344,6 +335,18 @@ fn FolderRow(
             span { class: "tree-icon", "📁" }
             span { class: "tree-name", "{folder.name}" }
             span { class: "tree-count", "{folder.note_count()}" }
+            button {
+                class: "folder-delete-btn",
+                title: "Delete folder (moves notes to parent)",
+                onclick: {
+                    let fp = folder_path_delete.clone();
+                    move |evt: MouseEvent| {
+                        evt.stop_propagation();
+                        on_delete_folder.call(fp.clone());
+                    }
+                },
+                "🗑"
+            }
         }
         if is_open {
             for child in folder.folders.iter() {
@@ -356,6 +359,7 @@ fn FolderRow(
                     state,
                     dragging_note,
                     on_move_note,
+                    on_delete_folder,
                     child_map,
                     expanded_notes,
                 }

@@ -239,7 +239,28 @@ fn render_stream_event(event: StreamEvent) -> Element {
 #[component]
 fn AssistantBlockView(block: ContentBlock) -> Element {
     match block {
-        ContentBlock::Text { text } => rsx! { pre { class: "entry-text", "{text}" } },
+        ContentBlock::Text { text } => {
+            let tts_text = text.clone();
+            rsx! {
+                div { class: "entry-text-wrap",
+                    pre { class: "entry-text", "{text}" }
+                    button {
+                        class: "tts-btn",
+                        title: "Read aloud",
+                        onclick: move |_| {
+                            let script = format!(
+                                "window.speechSynthesis.cancel();\
+                                 window.speechSynthesis.speak(new SpeechSynthesisUtterance({}));\
+                                 dioxus.send(null);",
+                                serde_json::to_string(&tts_text).unwrap_or_default()
+                            );
+                            spawn(async move { document::eval(&script).await.ok(); });
+                        },
+                        "🔊"
+                    }
+                }
+            }
+        }
         ContentBlock::Thinking { thinking } => rsx! {
             details { class: "entry-thinking",
                 summary { "thinking" }

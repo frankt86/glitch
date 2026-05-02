@@ -70,6 +70,39 @@ pub fn move_note(vault_root: &Utf8Path, note_rel: &str, target_folder_rel: &str)
     std::fs::rename(&src, dest_dir.join(filename))
 }
 
+/// Delete a folder by moving all `.md` notes inside it (recursively) to its
+/// parent directory, then removing the (now-empty) folder tree.
+pub fn delete_folder(vault_root: &Utf8Path, folder_rel: &str) -> io::Result<()> {
+    let folder_rel = folder_rel.trim().trim_matches(['/', '\\']);
+    if folder_rel.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "cannot delete vault root"));
+    }
+    let folder_abs = vault_root.join(folder_rel);
+    let parent_abs = folder_abs
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| vault_root.to_path_buf());
+    move_md_files_to(&folder_abs, &parent_abs)?;
+    std::fs::remove_dir_all(folder_abs.as_std_path())
+        .or_else(|e| if e.kind() == io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+}
+
+fn move_md_files_to(src_dir: &Utf8Path, dest_dir: &Utf8Path) -> io::Result<()> {
+    for entry in std::fs::read_dir(src_dir.as_std_path())? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(sub) = Utf8Path::from_path(&path) {
+                move_md_files_to(sub, dest_dir)?;
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let fname = path.file_name().unwrap();
+            std::fs::rename(&path, dest_dir.as_std_path().join(fname))?;
+        }
+    }
+    Ok(())
+}
+
 fn target_dir(vault_root: &Utf8Path, folder: &str) -> io::Result<Utf8PathBuf> {
     let folder = folder.trim().trim_matches(['/', '\\']);
     if folder.is_empty() {

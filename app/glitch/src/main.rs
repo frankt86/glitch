@@ -86,7 +86,15 @@ fn main() {
             Config::new()
                 .with_window(window)
                 .with_data_directory(webview_data_dir)
-                .with_custom_head(format!("<style>{STYLES}</style>"))
+                .with_custom_head(format!(
+                    "<style>{STYLES}</style>\
+                     <script>\
+                     document.addEventListener('dragover',function(e){{\
+                         e.preventDefault();\
+                         if(e.dataTransfer)e.dataTransfer.dropEffect='move';\
+                     }},false);\
+                     </script>"
+                ))
                 .with_custom_protocol("glitch-editor", |_req| {
                     dioxus::desktop::wry::http::Response::builder()
                         .header("Content-Type", "text/html; charset=utf-8")

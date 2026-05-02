@@ -298,6 +298,17 @@ pub fn App() -> Element {
         }
     };
 
+    let on_delete_folder = {
+        let app_state = app_state;
+        let mut history = chat_history;
+        move |folder_rel: String| {
+            let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) else { return };
+            if let Err(err) = vault_actions::delete_folder(&root, &folder_rel) {
+                history.write().push(ChatEntry::Error(format!("failed to delete folder: {err}")));
+            }
+        }
+    };
+
     let trigger_sync = {
         let app_state = app_state;
         let sync_tx = sync_tx.clone();
@@ -401,6 +412,7 @@ pub fn App() -> Element {
                     on_create_note: create_new_note,
                     on_create_folder,
                     on_move_note,
+                    on_delete_folder,
                 }
                 div {
                     class: "sidebar-resize-handle",
