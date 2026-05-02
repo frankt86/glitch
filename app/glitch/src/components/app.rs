@@ -51,6 +51,8 @@ pub fn App() -> Element {
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
     let extractor_visible = use_signal(|| false);
+    let mut sidebar_width = use_signal(|| 240.0f32);
+    let mut is_resizing = use_signal(|| false);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -244,7 +246,16 @@ pub fn App() -> Element {
         .unwrap_or_else(|| "no vault".into());
 
     rsx! {
-        div { class: "app",
+        div {
+            class: "app",
+            onmousemove: move |evt| {
+                if !*is_resizing.read() { return; }
+                let x = evt.data().client_coordinates().x as f32;
+                sidebar_width.set(x.clamp(160.0, 520.0));
+            },
+            onmouseup: move |_| is_resizing.set(false),
+            onmouseleave: move |_| is_resizing.set(false),
+
             header { class: "topbar",
                 div { class: "brand", "Glitch" }
                 button { class: "btn", onclick: open_vault, "Open vault…" }
@@ -276,8 +287,17 @@ pub fn App() -> Element {
                 SyncBadge { state: sync_state, on_sync: trigger_sync }
                 ClaudeBadge { status: claude_status, session: session_status }
             }
-            main { class: "workspace",
+            main {
+                class: "workspace",
+                style: "grid-template-columns: {*sidebar_width.read()}px 5px 1fr 380px",
                 Sidebar { state: app_state, on_create_note: create_new_note }
+                div {
+                    class: "sidebar-resize-handle",
+                    onmousedown: move |evt| {
+                        evt.prevent_default();
+                        is_resizing.set(true);
+                    },
+                }
                 Editor {
                     state: app_state,
                     on_command: {

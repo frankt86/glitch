@@ -183,17 +183,20 @@ fn layout(n: usize, edges: &[(usize, usize)], iterations: u32) -> Vec<(f32, f32)
     if n == 0 { return vec![]; }
     if n == 1 { return vec![(0.0, 0.0)]; }
 
+    // k: ideal node spacing; init_r: circle radius so adjacent nodes start ~k apart
+    let k = (1200.0f32 / n as f32).sqrt();
+    let init_r = k * (n as f32 / (2.0 * PI)).sqrt();
+    let t_max = k * (n as f32).sqrt() * 0.5;
+
     let mut pos: Vec<(f32, f32)> = (0..n)
         .map(|i| {
             let a = i as f32 * 2.0 * PI / n as f32;
-            (a.cos() * 10.0, a.sin() * 10.0)
+            (a.cos() * init_r, a.sin() * init_r)
         })
         .collect();
 
-    let k = (100.0f32 / n as f32).sqrt();
-
     for iter in 0..iterations {
-        let t = 2.0 * (1.0 - iter as f32 / iterations as f32).max(0.01);
+        let t = t_max * (1.0 - iter as f32 / iterations as f32).max(0.01);
         let mut disp = vec![(0.0f32, 0.0f32); n];
 
         // Repulsion
@@ -245,9 +248,9 @@ fn fit_scale(positions: &[(f32, f32)], vw: f32, vh: f32, margin: f32) -> f32 {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-const SVG_W: f32 = 900.0;
-const SVG_H: f32 = 580.0;
-const MARGIN: f32 = 60.0;
+const SVG_W: f32 = 1300.0;
+const SVG_H: f32 = 700.0;
+const MARGIN: f32 = 80.0;
 const NODE_R: f32 = 7.0;
 
 #[component]
@@ -336,13 +339,10 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
     let close = move |_| visible.set(false);
 
     rsx! {
-        div { class: "modal-overlay", onclick: close,
-            div {
-                class: "graph-card",
-                onclick: move |e| e.stop_propagation(),
+        div { class: "graph-card",
 
-                // ── Header ───────────────────────────────────────────────────
-                header { class: "graph-header",
+            // ── Header ───────────────────────────────────────────────────
+            header { class: "graph-header",
                     h2 { class: "graph-title", "Graph" }
                     div { class: "graph-filters",
                         // Each chip is a toggle button
@@ -375,18 +375,16 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
                     button { class: "btn-link graph-close", onclick: close, "×" }
                 }
 
-                // ── SVG ──────────────────────────────────────────────────────
-                svg {
-                    class: "graph-svg",
-                    width: "{SVG_W}",
-                    height: "{SVG_H}",
-                    view_box: "0 0 {SVG_W} {SVG_H}",
-                    style: "{cursor_style}",
+            // ── SVG ──────────────────────────────────────────────────────
+            svg {
+                class: "graph-svg",
+                view_box: "0 0 {SVG_W} {SVG_H}",
+                style: "{cursor_style}",
 
-                    // Pan/zoom event capture rect
-                    rect {
-                        x: "0", y: "0",
-                        width: "{SVG_W}", height: "{SVG_H}",
+                // Pan/zoom event capture rect
+                rect {
+                    x: "0", y: "0",
+                    width: "100%", height: "100%",
                         fill: "transparent",
                         onmousedown: move |evt| {
                             let c = evt.data().client_coordinates();
@@ -486,13 +484,12 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
                         }
                     }
 
-                    // Empty state overlay
-                    if is_empty {
-                        text {
-                            x: "{SVG_W / 2.0}", y: "{SVG_H / 2.0}",
-                            text_anchor: "middle", fill: "#4a5068", font_size: "14",
-                            "No notes in vault"
-                        }
+                // Empty state overlay
+                if is_empty {
+                    text {
+                        x: "{SVG_W / 2.0}", y: "{SVG_H / 2.0}",
+                        text_anchor: "middle", fill: "#4a5068", font_size: "14",
+                        "No notes in vault"
                     }
                 }
             }

@@ -59,7 +59,9 @@ pub fn load_types() -> Vec<NoteTypeConfig> {
 
 fn default_note_types() -> Vec<NoteTypeConfig> {
     vec![
-        NoteTypeConfig { name: "meeting".into(),  emoji: "🗓".into(),  template: "meeting.md".into() },
+        NoteTypeConfig { name: "note".into(),      emoji: "📝".into(),  template: "note.md".into() },
+        NoteTypeConfig { name: "task".into(),      emoji: "✅".into(),  template: "task.md".into() },
+        NoteTypeConfig { name: "meeting".into(),   emoji: "🗓".into(),  template: "meeting.md".into() },
         NoteTypeConfig { name: "book".into(),      emoji: "📚".into(),  template: "book.md".into() },
         NoteTypeConfig { name: "person".into(),    emoji: "👤".into(),  template: "person.md".into() },
         NoteTypeConfig { name: "project".into(),   emoji: "🚀".into(),  template: "project.md".into() },
@@ -157,6 +159,8 @@ template = "project.md"
     // This lets existing installs pick up new types without overwriting customisations.
     let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
     let new_types = [
+        ("note",     "📝",  "note.md"),
+        ("task",     "✅",  "task.md"),
         ("bible",    "📖",  "bible.md"),
         ("sermon",   "🎙️", "sermon.md"),
         ("prayer",   "🙏",  "prayer.md"),
@@ -179,6 +183,8 @@ template = "project.md"
     }
 
     let templates: &[(&str, &str)] = &[
+        ("note.md",    "---\ntitle: \"{{title}}\"\ntype: note\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n"),
+        ("task.md",    "---\ntitle: \"{{title}}\"\ntype: task\ncreated: {{date}}\ndue: \nstatus: open\npriority: medium\ntags: []\n---\n\n# {{title}}\n\n**Status:** open &nbsp; **Due:** &nbsp; **Priority:** medium\n\n## Description\n\n## Steps\n\n- [ ] \n\n## Notes\n\n"),
         ("meeting.md", "---\ntitle: \"{{title}}\"\ntype: meeting\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Date:** {{date}}  \n**Attendees:**  \n\n## Agenda\n\n## Notes\n\n## Action items\n\n- [ ] \n"),
         ("book.md",    "---\ntitle: \"{{title}}\"\ntype: book\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Author:**  \n**Started:** {{date}}  \n**Finished:**  \n\n## Summary\n\n## Key ideas\n\n## Quotes\n\n## My take\n\n"),
         ("person.md",  "---\ntitle: \"{{title}}\"\ntype: person\ncreated: {{date}}\ntags: []\n---\n\n# {{title}}\n\n**Role:**  \n**Contact:**  \n\n## Notes\n\n## Meetings\n\n"),

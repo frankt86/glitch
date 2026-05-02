@@ -60,15 +60,25 @@ html, body, #main {
 
 .workspace {
     display: grid;
-    grid-template-columns: 240px 1fr 380px;
     overflow: hidden;
 }
+
+.sidebar-resize-handle {
+    width: 5px;
+    cursor: ew-resize;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s;
+    z-index: 10;
+}
+.sidebar-resize-handle:hover { background: var(--accent); opacity: 0.5; }
 
 /* sidebar */
 .sidebar {
     border-right: 1px solid var(--border);
     background: var(--bg-elevated);
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sidebar-header {
@@ -545,7 +555,7 @@ html, body, #main {
 }
 
 /* settings panel */
-.settings-card, .graph-card {
+.settings-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -655,19 +665,22 @@ html, body, #main {
 
 /* ── Graph view ── */
 .graph-card {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
     background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    border: none;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
-    max-width: 960px;
-    width: 96vw;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
 .graph-header {
     display: flex; align-items: center; gap: 12px;
-    padding: 12px 16px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--bg);
+    flex-shrink: 0;
 }
 .graph-title { margin: 0; font-size: 15px; font-weight: 600; flex-shrink: 0; }
 .graph-filters { display: flex; align-items: center; gap: 6px; flex: 1; flex-wrap: wrap; }
@@ -686,7 +699,7 @@ html, body, #main {
 .chip-keyword   { background: transparent; border: 2px dashed #4a5068; }
 .graph-count { font-size: 11px; color: var(--fg-muted); margin-left: auto; }
 .graph-close { font-size: 18px; line-height: 1; padding: 0 4px; flex-shrink: 0; }
-.graph-svg { background: var(--bg); display: block; }
+.graph-svg { flex: 1; width: 100%; background: var(--bg); display: block; }
 
 .badge {
     padding: 3px 8px;
