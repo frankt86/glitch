@@ -93,16 +93,19 @@ fn main() {
             Config::new()
                 .with_window(window)
                 .with_data_directory(webview_data_dir)
+                .with_disable_drag_drop_handler(true)
                 .with_disable_context_menu(false)
                 .with_custom_head(format!(
                     "<style>{STYLES}</style>\
                      <script>\
                      window.__glitch_drag=null;\
                      window.__glitch_drop_id=null;\
+                     document.addEventListener('contextmenu',function(e){{e.preventDefault();}},true);\
                      document.addEventListener('dragstart',function(e){{\
                          window.__glitch_drop_id=null;\
                          var el=e.target&&e.target.closest?e.target.closest('[data-note-id]'):null;\
                          window.__glitch_drag=el?el.getAttribute('data-note-id'):null;\
+                         if(e.dataTransfer&&window.__glitch_drag){{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',window.__glitch_drag);}}\
                          console.log('[glitch] dragstart note='+window.__glitch_drag);\
                      }},true);\
                      document.addEventListener('dragend',function(){{\
