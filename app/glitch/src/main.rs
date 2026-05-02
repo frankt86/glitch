@@ -4,6 +4,7 @@ mod chat;
 mod commands;
 mod components;
 mod extract;
+mod menu;
 mod permissions;
 mod render;
 mod settings;
@@ -88,9 +89,12 @@ fn main() {
         .join("Glitch")
         .join("WebView2");
 
+    let app_menu = menu::build_app_menu();
+
     LaunchBuilder::desktop()
         .with_cfg(
             Config::new()
+                .with_menu(app_menu)
                 .with_window(window)
                 .with_data_directory(webview_data_dir)
                 .with_disable_drag_drop_handler(true)

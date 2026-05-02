@@ -8,6 +8,7 @@ use crate::components::permission_modal::PermissionModal;
 use crate::components::settings_panel::SettingsPanel;
 use crate::components::sidebar::Sidebar;
 use crate::extract;
+use crate::menu as app_menu;
 use crate::permissions::{self, PendingApproval, PermissionEvent};
 use crate::settings::{self, AppSettings};
 use crate::state::{
@@ -17,6 +18,7 @@ use crate::sync::sync_coroutine;
 use crate::vault_actions;
 use crate::watch::watch_coroutine;
 use camino::Utf8PathBuf;
+use dioxus::desktop::use_muda_event_handler;
 use dioxus::prelude::*;
 use glitch_ai::SessionConfig;
 use glitch_core::{NoteId, Vault};
@@ -48,14 +50,13 @@ pub fn App() -> Element {
     let pending_approvals = use_signal(Vec::<PendingApproval>::new);
     let permission_runtime = use_signal(|| Option::<PermissionRuntime>::None);
     let app_settings = use_signal(settings::load);
-    let mut settings_visible = use_signal(|| false);
-    let mut graph_visible = use_signal(|| false);
-    let mut extractor_visible = use_signal(|| false);
+    let settings_visible = use_signal(|| false);
+    let graph_visible = use_signal(|| false);
+    let extractor_visible = use_signal(|| false);
     let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
     let mut sidebar_collapsed = use_signal(|| false);
     let mut chat_collapsed = use_signal(|| false);
-    let mut open_menu: Signal<Option<String>> = use_signal(|| None);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -172,45 +173,68 @@ pub fn App() -> Element {
         }
     });
 
-    let open_vault = {
-        let mut app_state = app_state;
-        let chat_tx = chat_tx.clone();
-        let sync_tx = sync_tx.clone();
-        let watch_tx = watch_tx.clone();
-        let runtime_sig = permission_runtime;
-        move |_| {
-            let chat_tx = chat_tx.clone();
-            let sync_tx = sync_tx.clone();
-            let watch_tx = watch_tx.clone();
-            let runtime_sig = runtime_sig;
-            spawn(async move {
-                let Some(root) = pick_vault_dir().await else {
-                    return;
-                };
-                match Vault::load(&root) {
-                    Ok(vault) => {
-                        let root_path = vault.root.clone();
-                        settings::save_last_vault(root_path.as_str());
-                        app_state.write().vault = Some(vault);
-                        app_state.write().current_note = None;
-                        app_state.write().editor_content.clear();
-                        app_state.write().editor_dirty = false;
-
-                        let config = build_session_config(&runtime_sig, app_settings);
-                        chat_tx.send(ChatCommand::StartSession {
-                            root: root_path.clone(),
-                            config,
-                        });
-                        sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
-                        watch_tx.send(root_path);
-                    }
-                    Err(err) => {
-                        tracing::error!("failed to load vault: {err}");
+    // Native menu event handler — routes File/View/Sync menu items to signals.
+    use_muda_event_handler({
+        let mut settings_visible = settings_visible;
+        let mut graph_visible = graph_visible;
+        let mut extractor_visible = extractor_visible;
+        let mut sidebar_collapsed = sidebar_collapsed;
+        let mut chat_collapsed = chat_collapsed;
+        let sync_tx_m = sync_tx.clone();
+        let chat_tx_m = chat_tx.clone();
+        let watch_tx_m = watch_tx.clone();
+        let runtime_sig_m = permission_runtime;
+        move |event: &dioxus::desktop::muda::MenuEvent| {
+            match event.id().0.as_str() {
+                app_menu::OPEN_VAULT => {
+                    let chat_tx = chat_tx_m.clone();
+                    let sync_tx = sync_tx_m.clone();
+                    let watch_tx = watch_tx_m.clone();
+                    let mut app_state = app_state;
+                    let runtime_sig = runtime_sig_m;
+                    spawn(async move {
+                        let Some(root) = pick_vault_dir().await else { return };
+                        match Vault::load(&root) {
+                            Ok(vault) => {
+                                let root_path = vault.root.clone();
+                                settings::save_last_vault(root_path.as_str());
+                                app_state.write().vault = Some(vault);
+                                app_state.write().current_note = None;
+                                app_state.write().editor_content.clear();
+                                app_state.write().editor_dirty = false;
+                                let config = build_session_config(&runtime_sig, app_settings);
+                                chat_tx.send(ChatCommand::StartSession {
+                                    root: root_path.clone(),
+                                    config,
+                                });
+                                sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
+                                watch_tx.send(root_path);
+                            }
+                            Err(err) => tracing::error!("failed to load vault: {err}"),
+                        }
+                    });
+                }
+                app_menu::EXTRACT_URL => extractor_visible.set(true),
+                app_menu::SETTINGS => settings_visible.set(true),
+                app_menu::NOTES_PANEL => {
+                    // muda auto-toggles the check mark; mirror it in the signal
+                    let c = !*sidebar_collapsed.peek();
+                    sidebar_collapsed.set(c);
+                }
+                app_menu::CLAUDE_PANEL => {
+                    let c = !*chat_collapsed.peek();
+                    chat_collapsed.set(c);
+                }
+                app_menu::GRAPH => graph_visible.set(true),
+                app_menu::SYNC_NOW => {
+                    if let Some(root) = app_state.peek().vault.as_ref().map(|v| v.root.clone()) {
+                        sync_tx_m.send((root, SyncCommand::Sync));
                     }
                 }
-            });
+                _ => {}
+            }
         }
-    };
+    });
 
     // Sidebar "+ New" button → create a note (with optional type/template/folder).
     let create_new_note = {
@@ -359,156 +383,36 @@ pub fn App() -> Element {
             onmouseleave: move |_| is_resizing.set(false),
 
             header { class: "topbar",
-                // Full-screen overlay — dismisses open menu on outside click
-                if open_menu.read().is_some() {
-                    div { class: "menu-overlay", onclick: move |_| open_menu.set(None) }
-                }
-
                 // Sidebar collapse
                 button {
                     class: "btn-icon",
                     title: if *sidebar_collapsed.read() { "Show notes" } else { "Hide notes" },
-                    onclick: move |_| { let c = !*sidebar_collapsed.read(); sidebar_collapsed.set(c); },
+                    onclick: move |_| {
+                        let c = !*sidebar_collapsed.read();
+                        sidebar_collapsed.set(c);
+                        app_menu::set_notes_panel_checked(!c);
+                    },
                     if *sidebar_collapsed.read() { "⊢" } else { "⊣" }
                 }
 
-                // Application menu bar
-                div { class: "menu-bar",
-                    // ── File ──
-                    div { class: "menu-wrap",
-                        button {
-                            class: if open_menu.read().as_deref() == Some("file") { "menu-btn open" } else { "menu-btn" },
-                            onclick: move |_| {
-                                let n = if open_menu.read().as_deref() == Some("file") { None } else { Some("file".into()) };
-                                open_menu.set(n);
-                            },
-                            "File"
-                        }
-                        if open_menu.read().as_deref() == Some("file") {
-                            div { class: "menu-dropdown",
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |evt| { open_menu.set(None); open_vault(evt); },
-                                    "Open Vault…"
-                                }
-                                div { class: "menu-sep" }
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |_| { open_menu.set(None); extractor_visible.set(true); },
-                                    "Extract URL…"
-                                }
-                                div { class: "menu-sep" }
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |_| { open_menu.set(None); settings_visible.set(true); },
-                                    "Settings…"
-                                }
-                            }
-                        }
-                    }
-                    // ── View ──
-                    div { class: "menu-wrap",
-                        button {
-                            class: if open_menu.read().as_deref() == Some("view") { "menu-btn open" } else { "menu-btn" },
-                            onclick: move |_| {
-                                let n = if open_menu.read().as_deref() == Some("view") { None } else { Some("view".into()) };
-                                open_menu.set(n);
-                            },
-                            "View"
-                        }
-                        if open_menu.read().as_deref() == Some("view") {
-                            div { class: "menu-dropdown",
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |_| {
-                                        open_menu.set(None);
-                                        let c = !*sidebar_collapsed.read();
-                                        sidebar_collapsed.set(c);
-                                    },
-                                    span { class: "menu-check", if !*sidebar_collapsed.read() { "✓" } }
-                                    "Notes Panel"
-                                }
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |_| {
-                                        open_menu.set(None);
-                                        let c = !*chat_collapsed.read();
-                                        chat_collapsed.set(c);
-                                    },
-                                    span { class: "menu-check", if !*chat_collapsed.read() { "✓" } }
-                                    "Claude Panel"
-                                }
-                                div { class: "menu-sep" }
-                                button {
-                                    class: "menu-entry",
-                                    onclick: move |_| { open_menu.set(None); graph_visible.set(true); },
-                                    span { class: "menu-check" }
-                                    "Graph…"
-                                }
-                            }
-                        }
-                    }
-                    // ── Sync ──
-                    div { class: "menu-wrap",
-                        button {
-                            class: if open_menu.read().as_deref() == Some("sync") { "menu-btn open" } else { "menu-btn" },
-                            onclick: move |_| {
-                                let n = if open_menu.read().as_deref() == Some("sync") { None } else { Some("sync".into()) };
-                                open_menu.set(n);
-                            },
-                            "Sync"
-                        }
-                        if open_menu.read().as_deref() == Some("sync") {
-                            div { class: "menu-dropdown",
-                                {
-                                    let s = sync_state.read().clone();
-                                    let sc = s.css_class().to_string();
-                                    let sl = s.label().to_string();
-                                    let detail = match &s {
-                                        SyncState::Dirty(st) => format!(" · {} files", st.dirty_files.len()),
-                                        SyncState::Conflicts(st) => format!(
-                                            " · {} conflicts",
-                                            st.dirty_files.iter().filter(|e| e.code.contains('U')).count()
-                                        ),
-                                        SyncState::Error(err) => format!(" · {err}"),
-                                        _ => String::new(),
-                                    };
-                                    let can_sync = matches!(s, SyncState::Clean | SyncState::Dirty(_));
-                                    rsx! {
-                                        div { class: "menu-entry menu-status",
-                                            span { class: "{sc}", "git: {sl}{detail}" }
-                                        }
-                                        if can_sync {
-                                            button {
-                                                class: "menu-entry",
-                                                onclick: {
-                                                    let sync_tx = sync_tx.clone();
-                                                    move |_| {
-                                                        open_menu.set(None);
-                                                        if let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) {
-                                                            sync_tx.send((root, SyncCommand::Sync));
-                                                        }
-                                                    }
-                                                },
-                                                "Sync Now"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Vault path (centered, flex: 1)
+                // Vault path (flex: 1, centered)
                 div { class: "vault-path", "{vault_path_label}" }
 
-                // Claude status + Claude panel collapse
+                // Sync status
+                SyncBadge { state: sync_state }
+
+                // Claude status badge
                 ClaudeBadge { status: claude_status, session: session_status }
+
+                // Claude panel collapse
                 button {
                     class: "btn-icon",
                     title: if *chat_collapsed.read() { "Show Claude" } else { "Hide Claude" },
-                    onclick: move |_| { let c = !*chat_collapsed.read(); chat_collapsed.set(c); },
+                    onclick: move |_| {
+                        let c = !*chat_collapsed.read();
+                        chat_collapsed.set(c);
+                        app_menu::set_claude_panel_checked(!c);
+                    },
                     if *chat_collapsed.read() { "⊣" } else { "⊢" }
                 }
             }
@@ -690,6 +594,12 @@ fn build_context(app_state: Signal<AppState>) -> CommandContext {
         current_note_relative: current,
         current_note_content: body,
     }
+}
+
+#[component]
+fn SyncBadge(state: Signal<SyncState>) -> Element {
+    let s = state.read();
+    rsx! { div { class: "{s.css_class()}", "{s.label()}" } }
 }
 
 #[component]
