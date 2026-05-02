@@ -51,7 +51,7 @@ pub fn App() -> Element {
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
     let extractor_visible = use_signal(|| false);
-    let mut sidebar_width = use_signal(|| 320.0f32);
+    let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
 
     // Ensure agent instructions + note type templates exist on first run.
