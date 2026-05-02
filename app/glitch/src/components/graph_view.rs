@@ -211,12 +211,13 @@ fn layout(n: usize, edges: &[(usize, usize)], iterations: u32) -> Vec<(f32, f32)
                 disp[i].1 += dy / d * f;
             }
         }
-        // Attraction
+        // Attraction (linear spring — keeps linked notes near each other
+        // without collapsing them into a single point)
         for &(u, v) in edges {
             let dx = pos[u].0 - pos[v].0;
             let dy = pos[u].1 - pos[v].1;
             let d = (dx * dx + dy * dy).sqrt().max(0.001);
-            let f = d * d / k;
+            let f = d / k;
             let (fx, fy) = (dx / d * f, dy / d * f);
             disp[u].0 -= fx; disp[u].1 -= fy;
             disp[v].0 += fx; disp[v].1 += fy;
@@ -281,9 +282,14 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
     });
 
     // ── Layout (runs once per graph, synchronously; fast for < 300 notes) ────
+    // Only use intentional link edges (Wikilink/Related) for positioning.
+    // Hierarchy edges are O(n²) in dense folders and collapse everything together.
     let positions = use_memo(move || {
         let g = graph.read();
-        let edge_pairs: Vec<(usize, usize)> = g.edges.iter().map(|e| (e.from, e.to)).collect();
+        let edge_pairs: Vec<(usize, usize)> = g.edges.iter()
+            .filter(|e| matches!(e.kind, EdgeKind::Wikilink | EdgeKind::Related))
+            .map(|e| (e.from, e.to))
+            .collect();
         layout(g.nodes.len(), &edge_pairs, 300)
     });
 
