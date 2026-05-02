@@ -76,7 +76,7 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - **Persistent vault** — last-opened vault auto-reopens on next launch; vault path saved to `%APPDATA%\Glitch\settings.json`
 - **Auto-save** — edits are debounced and written to disk ~1.5 s after the last keystroke; the file watcher picks up the write and refreshes the graph so wikilink edges appear automatically
 - **Folder management** — create folders via the 📁 button in the sidebar; drag notes onto folders to move them; drag to the "↑ move to root" zone at the bottom of the tree to un-nest a note; hover a folder to reveal a 🗑 button that deletes the folder and moves its notes to the parent
-- **Sub-notes** — add `parent: other-note.md` (or bare title) to a note's frontmatter; the parent note shows a ▸/▾ chevron in the sidebar and expands to reveal its children
+- **Sub-notes** — drag any note onto another note to make it a child; drag to the "✂ remove parent" zone to unparent it; or add `parent: other-note.md` directly to frontmatter; the parent note shows a ▸/▾ chevron and expands to reveal its children; cycle-safe (can't drop a parent onto its own descendant)
 - **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
 - **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface
 - **Graph view** — full-screen force-directed layout of all notes; typed edges (wikilink, frontmatter related, hierarchy, shared keyword); filter chips; pan and zoom; click any node to open that note in the editor

@@ -309,6 +309,17 @@ pub fn App() -> Element {
         }
     };
 
+    let on_reparent = {
+        let app_state = app_state;
+        let mut history = chat_history;
+        move |(note_rel, parent_rel): (String, Option<String>)| {
+            let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) else { return };
+            if let Err(err) = vault_actions::set_note_parent(&root, &note_rel, parent_rel.as_deref()) {
+                history.write().push(ChatEntry::Error(format!("failed to set parent: {err}")));
+            }
+        }
+    };
+
     let trigger_sync = {
         let app_state = app_state;
         let sync_tx = sync_tx.clone();
@@ -413,6 +424,7 @@ pub fn App() -> Element {
                     on_create_folder,
                     on_move_note,
                     on_delete_folder,
+                    on_reparent,
                 }
                 div {
                     class: "sidebar-resize-handle",

@@ -13,6 +13,7 @@ pub fn Sidebar(
     on_create_folder: EventHandler<String>,
     on_move_note: EventHandler<(String, String)>,
     on_delete_folder: EventHandler<String>,
+    on_reparent: EventHandler<(String, Option<String>)>,
 ) -> Element {
     let tree_memo = use_memo(move || {
         state.read().vault.as_ref().map(|v| TreeFolder::build(&v.notes, default_emoji))
@@ -43,6 +44,7 @@ pub fn Sidebar(
     let mut search_query = use_signal(String::new);
     let mut dragging_note: Signal<Option<String>> = use_signal(|| None);
     let mut is_root_drag_over: Signal<bool> = use_signal(|| false);
+    let mut is_unparent_drag_over: Signal<bool> = use_signal(|| false);
     let has_vault = state.read().vault.is_some();
 
     let current = state.read().current_note.clone();
@@ -229,6 +231,7 @@ pub fn Sidebar(
                             dragging_note,
                             child_map,
                             expanded_notes,
+                            on_reparent,
                         }
                     }
                 } else if let Some(t) = tree {
@@ -242,6 +245,7 @@ pub fn Sidebar(
                             dragging_note,
                             child_map,
                             expanded_notes,
+                            on_reparent,
                         }
                     }
                     for folder in t.folders.iter() {
@@ -255,6 +259,7 @@ pub fn Sidebar(
                             dragging_note,
                             on_move_note,
                             on_delete_folder,
+                            on_reparent,
                             child_map,
                             expanded_notes,
                         }
@@ -280,6 +285,27 @@ pub fn Sidebar(
                         },
                         "↑ move to root"
                     }
+                    if dragging_note.read().is_some() {
+                        div {
+                            class: if *is_unparent_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
+                            ondragover: move |evt| evt.prevent_default(),
+                            ondragenter: move |_| is_unparent_drag_over.set(true),
+                            ondragleave: move |_| is_unparent_drag_over.set(false),
+                            ondrop: move |_| {
+                                is_unparent_drag_over.set(false);
+                                spawn(async move {
+                                    let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
+                                    let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
+                                    let note_id = js_id.or_else(|| dragging_note.read().clone());
+                                    if let Some(id) = note_id {
+                                        dragging_note.set(None);
+                                        on_reparent.call((id, None));
+                                    }
+                                });
+                            },
+                            "✂ remove parent"
+                        }
+                    }
                 }
             }
         }
@@ -296,6 +322,7 @@ fn FolderRow(
     dragging_note: Signal<Option<String>>,
     on_move_note: EventHandler<(String, String)>,
     on_delete_folder: EventHandler<String>,
+    on_reparent: EventHandler<(String, Option<String>)>,
     child_map: ReadOnlySignal<HashMap<String, Vec<NoteRef>>>,
     expanded_notes: Signal<HashSet<String>>,
 ) -> Element {
@@ -369,6 +396,7 @@ fn FolderRow(
                     dragging_note,
                     on_move_note,
                     on_delete_folder,
+                    on_reparent,
                     child_map,
                     expanded_notes,
                 }
@@ -383,6 +411,7 @@ fn FolderRow(
                     dragging_note,
                     child_map,
                     expanded_notes,
+                    on_reparent,
                 }
             }
         }
@@ -398,6 +427,7 @@ fn NoteRow(
     dragging_note: Signal<Option<String>>,
     child_map: ReadOnlySignal<HashMap<String, Vec<NoteRef>>>,
     expanded_notes: Signal<HashSet<String>>,
+    on_reparent: EventHandler<(String, Option<String>)>,
 ) -> Element {
     let children: Vec<NoteRef> =
         child_map.read().get(note.id.as_str()).cloned().unwrap_or_default();
@@ -406,7 +436,10 @@ fn NoteRow(
     let is_expanded = expanded_notes.read().contains(&note_id_str);
 
     let active = current.as_ref() == Some(&note.id);
-    let class = if active { "tree-row tree-note active" } else { "tree-row tree-note" };
+    let mut is_drop_target = use_signal(|| false);
+    let drop_cls = if *is_drop_target.read() { " drag-over" } else { "" };
+    let active_cls = if active { " active" } else { "" };
+    let class = format!("tree-row tree-note{active_cls}{drop_cls}");
     let indent = format!("padding-left: {}px", depth * 12 + 22);
     let id = note.id.clone();
     let kw_count = note.keywords.len();
@@ -425,9 +458,43 @@ fn NoteRow(
             },
             ondragstart: {
                 let note_rel = note_rel.clone();
-                move |_| dragging_note.set(Some(note_rel.clone()))
+                move |_| {
+                    is_drop_target.set(false);
+                    dragging_note.set(Some(note_rel.clone()));
+                }
             },
-            ondragend: move |_| dragging_note.set(None),
+            ondragend: move |_| {
+                is_drop_target.set(false);
+                dragging_note.set(None);
+            },
+            ondragover: move |evt| evt.prevent_default(),
+            ondragenter: {
+                let note_rel = note_rel.clone();
+                move |_| {
+                    if dragging_note.read().as_deref() != Some(note_rel.as_str()) {
+                        is_drop_target.set(true);
+                    }
+                }
+            },
+            ondragleave: move |_| is_drop_target.set(false),
+            ondrop: {
+                let tid = note_rel.clone();
+                move |_| {
+                    is_drop_target.set(false);
+                    let tid = tid.clone();
+                    spawn(async move {
+                        let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
+                        let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
+                        let did = js_id.or_else(|| dragging_note.read().clone());
+                        if let Some(did) = did {
+                            dragging_note.set(None);
+                            if did != tid && !is_descendant(&*child_map.read(), &did, &tid) {
+                                on_reparent.call((did, Some(tid.clone())));
+                            }
+                        }
+                    });
+                }
+            },
             onclick: {
                 let id = id.clone();
                 let mut state = state;
@@ -462,10 +529,38 @@ fn NoteRow(
                     dragging_note,
                     child_map,
                     expanded_notes,
+                    on_reparent,
                 }
             }
         }
     }
+}
+
+/// Returns true if `needle` is anywhere in the subtree rooted at `ancestor`.
+/// Used to prevent drag-drop cycles (e.g. dropping a parent onto its own child).
+fn is_descendant(child_map: &HashMap<String, Vec<NoteRef>>, ancestor: &str, needle: &str) -> bool {
+    let mut visited = HashSet::new();
+    is_descendant_inner(child_map, ancestor, needle, &mut visited)
+}
+
+fn is_descendant_inner(
+    child_map: &HashMap<String, Vec<NoteRef>>,
+    current: &str,
+    needle: &str,
+    visited: &mut HashSet<String>,
+) -> bool {
+    if !visited.insert(current.to_string()) {
+        return false;
+    }
+    if let Some(children) = child_map.get(current) {
+        for child in children {
+            let cid = child.id.as_str();
+            if cid == needle || is_descendant_inner(child_map, cid, needle, visited) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn flatten_refs(folder: &TreeFolder) -> Vec<NoteRef> {

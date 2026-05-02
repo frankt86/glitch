@@ -70,6 +70,64 @@ pub fn move_note(vault_root: &Utf8Path, note_rel: &str, target_folder_rel: &str)
     std::fs::rename(&src, dest_dir.join(filename))
 }
 
+/// Set or clear the `parent` field in a note's frontmatter without touching
+/// any other content. `parent_rel` is a vault-relative path; `None` removes
+/// the field. Reads the file, rewrites only the parent line, writes back.
+pub fn set_note_parent(
+    vault_root: &Utf8Path,
+    note_rel: &str,
+    parent_rel: Option<&str>,
+) -> io::Result<()> {
+    let path = vault_root.join(note_rel);
+    let content = std::fs::read_to_string(path.as_std_path())?;
+    let new_content = rewrite_parent_field(&content, parent_rel);
+    if new_content != content {
+        std::fs::write(path.as_std_path(), new_content.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// Rewrite (or add/remove) the `parent:` key in a note's YAML frontmatter.
+fn rewrite_parent_field(content: &str, parent_val: Option<&str>) -> String {
+    let nl = if content.contains("\r\n") { "\r\n" } else { "\n" };
+    let fm_start = format!("---{nl}");
+
+    if !content.starts_with(fm_start.as_str()) {
+        // No frontmatter — prepend a minimal block if we need to set a parent.
+        if let Some(val) = parent_val {
+            return format!("---{nl}parent: {}{nl}---{nl}{content}", yaml_scalar(val));
+        }
+        return content.to_string();
+    }
+
+    let after_open = &content[fm_start.len()..];
+    let close_marker = format!("{nl}---");
+    if let Some(pos) = after_open.find(close_marker.as_str()) {
+        let yaml_block = &after_open[..pos];
+        let after_close = &after_open[pos + close_marker.len()..];
+        let new_yaml = rewrite_yaml_parent(yaml_block, parent_val, nl);
+        format!("---{nl}{new_yaml}{nl}---{after_close}")
+    } else {
+        // Malformed / unclosed frontmatter — leave untouched.
+        content.to_string()
+    }
+}
+
+fn rewrite_yaml_parent(yaml: &str, parent_val: Option<&str>, nl: &str) -> String {
+    let mut lines: Vec<String> = yaml.split(nl).map(|l| l.to_string()).collect();
+    let existing = lines.iter().position(|l| {
+        let t = l.trim_end();
+        t == "parent:" || t.starts_with("parent: ") || t.starts_with("parent:\t")
+    });
+    match (parent_val, existing) {
+        (Some(val), Some(i)) => lines[i] = format!("parent: {}", yaml_scalar(val)),
+        (Some(val), None) => lines.push(format!("parent: {}", yaml_scalar(val))),
+        (None, Some(i)) => { lines.remove(i); }
+        (None, None) => {}
+    }
+    lines.join(nl)
+}
+
 /// Delete a folder by moving all `.md` notes inside it (recursively) to its
 /// parent directory, then removing the (now-empty) folder tree.
 pub fn delete_folder(vault_root: &Utf8Path, folder_rel: &str) -> io::Result<()> {
@@ -150,6 +208,53 @@ fn write_with_dedup(vault_root: &Utf8Path, slug: &str, body: &str) -> io::Result
 fn yaml_scalar(s: &str) -> String {
     let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_parent_to_existing_frontmatter() {
+        let c = "---\ntitle: \"foo\"\n---\n\n# foo\n";
+        assert_eq!(
+            rewrite_parent_field(c, Some("bar.md")),
+            "---\ntitle: \"foo\"\nparent: \"bar.md\"\n---\n\n# foo\n"
+        );
+    }
+
+    #[test]
+    fn replace_existing_parent() {
+        let c = "---\ntitle: \"foo\"\nparent: \"old.md\"\n---\n\n# foo\n";
+        assert_eq!(
+            rewrite_parent_field(c, Some("new.md")),
+            "---\ntitle: \"foo\"\nparent: \"new.md\"\n---\n\n# foo\n"
+        );
+    }
+
+    #[test]
+    fn remove_parent() {
+        let c = "---\ntitle: \"foo\"\nparent: \"old.md\"\n---\n\n# foo\n";
+        assert_eq!(
+            rewrite_parent_field(c, None),
+            "---\ntitle: \"foo\"\n---\n\n# foo\n"
+        );
+    }
+
+    #[test]
+    fn add_parent_no_frontmatter() {
+        let c = "# foo\n\nsome text\n";
+        assert_eq!(
+            rewrite_parent_field(c, Some("bar.md")),
+            "---\nparent: \"bar.md\"\n---\n# foo\n\nsome text\n"
+        );
+    }
+
+    #[test]
+    fn remove_parent_no_frontmatter_is_noop() {
+        let c = "# foo\n\nsome text\n";
+        assert_eq!(rewrite_parent_field(c, None), c);
+    }
 }
 
 fn slugify(s: &str) -> String {

@@ -193,6 +193,7 @@ html, body, #main {
 .tree-folder { font-weight: 500; }
 .tree-folder.drag-over { background: var(--accent-bg); outline: 1px solid var(--accent); }
 .tree-note { font-weight: 400; }
+.tree-note.drag-over { background: var(--accent-bg); outline: 1px dashed var(--accent); }
 
 .folder-delete-btn {
     margin-left: auto;
