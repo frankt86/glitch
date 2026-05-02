@@ -13,6 +13,7 @@ pub fn ChatPanel(
 ) -> Element {
     let mut draft = use_signal(String::new);
     let mut palette_index = use_signal(|| 0usize);
+    let mut is_listening = use_signal(|| false);
     let entries = history.read().clone();
 
     let send = move |_| {
@@ -116,7 +117,36 @@ pub fn ChatPanel(
                         }
                     }
                 }
-                button { class: "btn btn-primary", onclick: send, "Send (Enter)" }
+                div { class: "chat-actions",
+                    button {
+                        class: if *is_listening.read() { "btn btn-mic listening" } else { "btn btn-mic" },
+                        title: "Voice input",
+                        onclick: move |_| {
+                            if *is_listening.read() { return; }
+                            is_listening.set(true);
+                            spawn(async move {
+                                let script = r#"
+                                    const R = window.SpeechRecognition || window.webkitSpeechRecognition;
+                                    if (!R) { dioxus.send(''); return; }
+                                    const r = new R();
+                                    r.lang = 'en-US';
+                                    r.interimResults = false;
+                                    r.maxAlternatives = 1;
+                                    r.onresult = e => dioxus.send(e.results[0][0].transcript);
+                                    r.onerror = () => dioxus.send('');
+                                    r.start();
+                                "#;
+                                let mut eval = document::eval(script);
+                                if let Ok(t) = eval.recv::<String>().await {
+                                    if !t.is_empty() { draft.set(t); }
+                                }
+                                is_listening.set(false);
+                            });
+                        },
+                        "🎤"
+                    }
+                    button { class: "btn btn-primary", onclick: send, "Send (Enter)" }
+                }
             }
         }
     }

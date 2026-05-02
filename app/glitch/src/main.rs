@@ -89,10 +89,24 @@ fn main() {
                 .with_custom_head(format!(
                     "<style>{STYLES}</style>\
                      <script>\
+                     window.__glitch_drag=null;\
+                     document.addEventListener('dragstart',function(e){{\
+                         var el=e.target&&e.target.closest?e.target.closest('[data-note-id]'):null;\
+                         window.__glitch_drag=el?el.getAttribute('data-note-id'):null;\
+                     }},true);\
+                     document.addEventListener('dragend',function(){{\
+                         window.__glitch_drag=null;\
+                     }},true);\
+                     document.addEventListener('dragenter',function(e){{\
+                         e.preventDefault();\
+                     }},true);\
                      document.addEventListener('dragover',function(e){{\
                          e.preventDefault();\
                          if(e.dataTransfer)e.dataTransfer.dropEffect='move';\
-                     }},false);\
+                     }},true);\
+                     document.addEventListener('drop',function(e){{\
+                         e.preventDefault();\
+                     }},true);\
                      </script>"
                 ))
                 .with_custom_protocol("glitch-editor", |_req| {

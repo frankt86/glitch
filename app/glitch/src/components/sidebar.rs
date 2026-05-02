@@ -268,11 +268,15 @@ pub fn Sidebar(
                         ondragleave: move |_| is_root_drag_over.set(false),
                         ondrop: move |_| {
                             is_root_drag_over.set(false);
-                            let note_rel_opt = dragging_note.read().clone();
-                            if let Some(note_rel) = note_rel_opt {
-                                dragging_note.set(None);
-                                on_move_note.call((note_rel, String::new()));
-                            }
+                            spawn(async move {
+                                let mut ev = document::eval("dioxus.send(window.__glitch_drag||'')");
+                                let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
+                                let note_id = js_id.or_else(|| dragging_note.read().clone());
+                                if let Some(id) = note_id {
+                                    dragging_note.set(None);
+                                    on_move_note.call((id, String::new()));
+                                }
+                            });
                         },
                         "↑ move to root"
                     }
@@ -324,11 +328,16 @@ fn FolderRow(
                 let folder_path_drop = folder_path_drop.clone();
                 move |_| {
                     is_drag_over.set(false);
-                    let note_rel_opt = dragging_note.read().clone();
-                    if let Some(note_rel) = note_rel_opt {
-                        dragging_note.set(None);
-                        on_move_note.call((note_rel, folder_path_drop.clone()));
-                    }
+                    let fp = folder_path_drop.clone();
+                    spawn(async move {
+                        let mut ev = document::eval("dioxus.send(window.__glitch_drag||'')");
+                        let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
+                        let note_id = js_id.or_else(|| dragging_note.read().clone());
+                        if let Some(id) = note_id {
+                            dragging_note.set(None);
+                            on_move_note.call((id, fp));
+                        }
+                    });
                 }
             },
             span { class: "tree-chevron", "{chevron}" }
@@ -408,6 +417,7 @@ fn NoteRow(
             class: "{class}",
             style: "{indent}",
             draggable: "true",
+            "data-note-id": "{note_rel}",
             title: if kw_count > 0 {
                 format!("{} keyword(s): {}", kw_count, note.keywords.join(", "))
             } else {

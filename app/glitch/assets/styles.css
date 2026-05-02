@@ -528,6 +528,11 @@ html, body, #main {
 .btn-primary { background: var(--accent); color: #0f1117; border-color: var(--accent); }
 .btn-link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; }
 
+.chat-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.btn-mic { font-size: 14px; padding: 4px 8px; }
+@keyframes mic-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.btn-mic.listening { border-color: var(--accent); animation: mic-pulse 1s ease-in-out infinite; }
+
 .sync-group {
     display: flex;
     align-items: center;
