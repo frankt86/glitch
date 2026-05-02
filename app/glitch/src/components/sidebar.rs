@@ -19,7 +19,7 @@ pub fn Sidebar(
         state.read().vault.as_ref().map(|v| TreeFolder::build(&v.notes, default_emoji))
     });
     let tree = tree_memo.read().clone();
-    let total = tree.as_ref().map(|t| t.note_count()).unwrap_or(0);
+    let total = state.read().vault.as_ref().map(|v| v.notes.len()).unwrap_or(0);
 
     let child_map = use_memo(move || {
         tree_memo.read().as_ref().map(|t| t.child_map.clone()).unwrap_or_default()

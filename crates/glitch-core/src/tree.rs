@@ -80,6 +80,18 @@ impl TreeFolder {
 
         let mut folders: Vec<TreeFolder> = root_folders.into_values().collect();
         folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+        // Remove notes that are already rendered as children of another note,
+        // so they don't appear twice (once in their folder, once under their parent).
+        let child_ids: std::collections::HashSet<String> = child_map
+            .values()
+            .flat_map(|v| v.iter().map(|n| n.id.as_str().to_string()))
+            .collect();
+        root_notes.retain(|n| !child_ids.contains(n.id.as_str()));
+        for f in &mut folders {
+            remove_children_recursive(f, &child_ids);
+        }
+
         for f in &mut folders {
             sort_recursive(f);
         }
@@ -130,6 +142,16 @@ fn insert(
             .collect();
         insert(&mut child_map, tail, &path, note_ref);
         folder.folders = child_map.into_values().collect();
+    }
+}
+
+fn remove_children_recursive(
+    folder: &mut TreeFolder,
+    child_ids: &std::collections::HashSet<String>,
+) {
+    folder.notes.retain(|n| !child_ids.contains(n.id.as_str()));
+    for sub in &mut folder.folders {
+        remove_children_recursive(sub, child_ids);
     }
 }
 
