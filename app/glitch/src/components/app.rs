@@ -48,13 +48,14 @@ pub fn App() -> Element {
     let pending_approvals = use_signal(Vec::<PendingApproval>::new);
     let permission_runtime = use_signal(|| Option::<PermissionRuntime>::None);
     let app_settings = use_signal(settings::load);
-    let settings_visible = use_signal(|| false);
-    let graph_visible = use_signal(|| false);
-    let extractor_visible = use_signal(|| false);
+    let mut settings_visible = use_signal(|| false);
+    let mut graph_visible = use_signal(|| false);
+    let mut extractor_visible = use_signal(|| false);
     let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
     let mut sidebar_collapsed = use_signal(|| false);
     let mut chat_collapsed = use_signal(|| false);
+    let mut open_menu: Signal<Option<String>> = use_signal(|| None);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -320,16 +321,6 @@ pub fn App() -> Element {
         }
     };
 
-    let trigger_sync = {
-        let app_state = app_state;
-        let sync_tx = sync_tx.clone();
-        move |_| {
-            if let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) {
-                sync_tx.send((root, SyncCommand::Sync));
-            }
-        }
-    };
-
     let on_decision = {
         let mut pending = pending_approvals;
         let runtime_sig = permission_runtime;
@@ -368,50 +359,156 @@ pub fn App() -> Element {
             onmouseleave: move |_| is_resizing.set(false),
 
             header { class: "topbar",
+                // Full-screen overlay — dismisses open menu on outside click
+                if open_menu.read().is_some() {
+                    div { class: "menu-overlay", onclick: move |_| open_menu.set(None) }
+                }
+
+                // Sidebar collapse
                 button {
-                    class: "btn",
-                    title: if *sidebar_collapsed.read() { "Show notes panel" } else { "Hide notes panel" },
-                    onclick: move |_| {
-                        let c = !*sidebar_collapsed.read();
-                        sidebar_collapsed.set(c);
-                    },
+                    class: "btn-icon",
+                    title: if *sidebar_collapsed.read() { "Show notes" } else { "Hide notes" },
+                    onclick: move |_| { let c = !*sidebar_collapsed.read(); sidebar_collapsed.set(c); },
                     if *sidebar_collapsed.read() { "⊢" } else { "⊣" }
                 }
-                button { class: "btn", onclick: open_vault, "Open vault…" }
+
+                // Application menu bar
+                div { class: "menu-bar",
+                    // ── File ──
+                    div { class: "menu-wrap",
+                        button {
+                            class: if open_menu.read().as_deref() == Some("file") { "menu-btn open" } else { "menu-btn" },
+                            onclick: move |_| {
+                                let n = if open_menu.read().as_deref() == Some("file") { None } else { Some("file".into()) };
+                                open_menu.set(n);
+                            },
+                            "File"
+                        }
+                        if open_menu.read().as_deref() == Some("file") {
+                            div { class: "menu-dropdown",
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |evt| { open_menu.set(None); open_vault(evt); },
+                                    "Open Vault…"
+                                }
+                                div { class: "menu-sep" }
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |_| { open_menu.set(None); extractor_visible.set(true); },
+                                    "Extract URL…"
+                                }
+                                div { class: "menu-sep" }
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |_| { open_menu.set(None); settings_visible.set(true); },
+                                    "Settings…"
+                                }
+                            }
+                        }
+                    }
+                    // ── View ──
+                    div { class: "menu-wrap",
+                        button {
+                            class: if open_menu.read().as_deref() == Some("view") { "menu-btn open" } else { "menu-btn" },
+                            onclick: move |_| {
+                                let n = if open_menu.read().as_deref() == Some("view") { None } else { Some("view".into()) };
+                                open_menu.set(n);
+                            },
+                            "View"
+                        }
+                        if open_menu.read().as_deref() == Some("view") {
+                            div { class: "menu-dropdown",
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |_| {
+                                        open_menu.set(None);
+                                        let c = !*sidebar_collapsed.read();
+                                        sidebar_collapsed.set(c);
+                                    },
+                                    span { class: "menu-check", if !*sidebar_collapsed.read() { "✓" } }
+                                    "Notes Panel"
+                                }
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |_| {
+                                        open_menu.set(None);
+                                        let c = !*chat_collapsed.read();
+                                        chat_collapsed.set(c);
+                                    },
+                                    span { class: "menu-check", if !*chat_collapsed.read() { "✓" } }
+                                    "Claude Panel"
+                                }
+                                div { class: "menu-sep" }
+                                button {
+                                    class: "menu-entry",
+                                    onclick: move |_| { open_menu.set(None); graph_visible.set(true); },
+                                    span { class: "menu-check" }
+                                    "Graph…"
+                                }
+                            }
+                        }
+                    }
+                    // ── Sync ──
+                    div { class: "menu-wrap",
+                        button {
+                            class: if open_menu.read().as_deref() == Some("sync") { "menu-btn open" } else { "menu-btn" },
+                            onclick: move |_| {
+                                let n = if open_menu.read().as_deref() == Some("sync") { None } else { Some("sync".into()) };
+                                open_menu.set(n);
+                            },
+                            "Sync"
+                        }
+                        if open_menu.read().as_deref() == Some("sync") {
+                            div { class: "menu-dropdown",
+                                {
+                                    let s = sync_state.read().clone();
+                                    let sc = s.css_class().to_string();
+                                    let sl = s.label().to_string();
+                                    let detail = match &s {
+                                        SyncState::Dirty(st) => format!(" · {} files", st.dirty_files.len()),
+                                        SyncState::Conflicts(st) => format!(
+                                            " · {} conflicts",
+                                            st.dirty_files.iter().filter(|e| e.code.contains('U')).count()
+                                        ),
+                                        SyncState::Error(err) => format!(" · {err}"),
+                                        _ => String::new(),
+                                    };
+                                    let can_sync = matches!(s, SyncState::Clean | SyncState::Dirty(_));
+                                    rsx! {
+                                        div { class: "menu-entry menu-status",
+                                            span { class: "{sc}", "git: {sl}{detail}" }
+                                        }
+                                        if can_sync {
+                                            button {
+                                                class: "menu-entry",
+                                                onclick: {
+                                                    let sync_tx = sync_tx.clone();
+                                                    move |_| {
+                                                        open_menu.set(None);
+                                                        if let Some(root) = app_state.read().vault.as_ref().map(|v| v.root.clone()) {
+                                                            sync_tx.send((root, SyncCommand::Sync));
+                                                        }
+                                                    }
+                                                },
+                                                "Sync Now"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Vault path (centered, flex: 1)
                 div { class: "vault-path", "{vault_path_label}" }
-                button {
-                    class: "btn",
-                    onclick: {
-                        let mut extractor_visible = extractor_visible;
-                        move |_| extractor_visible.set(true)
-                    },
-                    "Extract URL…"
-                }
-                button {
-                    class: "btn",
-                    onclick: {
-                        let mut graph_visible = graph_visible;
-                        move |_| graph_visible.set(true)
-                    },
-                    "Graph"
-                }
-                button {
-                    class: "btn",
-                    onclick: {
-                        let mut settings_visible = settings_visible;
-                        move |_| settings_visible.set(true)
-                    },
-                    "Settings"
-                }
-                SyncBadge { state: sync_state, on_sync: trigger_sync }
+
+                // Claude status + Claude panel collapse
                 ClaudeBadge { status: claude_status, session: session_status }
                 button {
-                    class: "btn",
-                    title: if *chat_collapsed.read() { "Show Claude panel" } else { "Hide Claude panel" },
-                    onclick: move |_| {
-                        let c = !*chat_collapsed.read();
-                        chat_collapsed.set(c);
-                    },
+                    class: "btn-icon",
+                    title: if *chat_collapsed.read() { "Show Claude" } else { "Hide Claude" },
+                    onclick: move |_| { let c = !*chat_collapsed.read(); chat_collapsed.set(c); },
                     if *chat_collapsed.read() { "⊣" } else { "⊢" }
                 }
             }
@@ -592,37 +689,6 @@ fn build_context(app_state: Signal<AppState>) -> CommandContext {
         vault_root,
         current_note_relative: current,
         current_note_content: body,
-    }
-}
-
-#[component]
-fn SyncBadge(state: Signal<SyncState>, on_sync: EventHandler<()>) -> Element {
-    let s = state.read().clone();
-    let class = s.css_class().to_string();
-    let label = s.label();
-    let detail = match &s {
-        SyncState::Dirty(st) => format!(" · {} files", st.dirty_files.len()),
-        SyncState::Conflicts(st) => {
-            format!(
-                " · {} conflicts",
-                st.dirty_files.iter().filter(|e| e.code.contains('U')).count()
-            )
-        }
-        SyncState::Error(err) => format!(" · {err}"),
-        _ => String::new(),
-    };
-    let can_sync = matches!(s, SyncState::Clean | SyncState::Dirty(_));
-    rsx! {
-        div { class: "sync-group",
-            div { class: "{class}", title: "{detail}", "git: {label}" }
-            if can_sync {
-                button {
-                    class: "btn",
-                    onclick: move |_| on_sync.call(()),
-                    "Sync"
-                }
-            }
-        }
     }
 }
 

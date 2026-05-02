@@ -96,7 +96,7 @@ pub fn Sidebar(
                         }
                         new_folder_open.set(false);
                     },
-                    "+ New"
+                    "+ 📄"
                 }
                 button {
                     class: "sidebar-newbtn",
@@ -108,7 +108,7 @@ pub fn Sidebar(
                         if !next { new_folder_name.set(String::new()); }
                         new_note_open.set(false);
                     },
-                    "📁"
+                    "+ 📁"
                 }
             }
             if has_vault {
