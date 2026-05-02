@@ -51,11 +51,13 @@ pub async fn watch_coroutine(
                     while e.try_recv().is_ok() {}
                 }
                 if let Some(r) = root.as_ref() {
-                    match Vault::load(r) {
-                        Ok(v) => {
+                    let r = r.clone();
+                    match tokio::task::spawn_blocking(move || Vault::load(&r)).await {
+                        Ok(Ok(v)) => {
                             app_state.write().vault = Some(v);
                         }
-                        Err(err) => tracing::warn!("vault reload failed: {err}"),
+                        Ok(Err(err)) => tracing::warn!("vault reload failed: {err}"),
+                        Err(err) => tracing::warn!("vault reload panicked: {err}"),
                     }
                 }
             }

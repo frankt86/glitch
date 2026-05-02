@@ -42,12 +42,6 @@ html, body, #main {
     background: var(--bg-elevated);
 }
 
-.brand {
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    color: var(--accent);
-}
-
 .vault-path {
     flex: 1;
     color: var(--fg-muted);

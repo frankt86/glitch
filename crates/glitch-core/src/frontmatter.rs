@@ -22,6 +22,9 @@ pub struct Frontmatter {
     pub related: Vec<String>,
     #[serde(default)]
     pub created: Option<String>,
+    /// Parent note — vault-relative path, bare filename, or title.
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 impl Frontmatter {

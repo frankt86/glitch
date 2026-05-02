@@ -171,7 +171,11 @@ fn find_by_name<'a>(
             let pos = notes.iter().position(|n| {
                 n.id.0.file_stem().map(|s| s.to_lowercase()) == Some(name_lower.clone())
             })?;
-            // SAFETY: position came from iterating notes, idx has all notes
+            idx.get(notes[pos].id.as_str())
+        })
+        .or_else(|| {
+            // title match (case-insensitive) — handles [[My Note]] → my-note.md
+            let pos = notes.iter().position(|n| n.title.to_lowercase() == name_lower)?;
             idx.get(notes[pos].id.as_str())
         })
 }

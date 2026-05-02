@@ -142,8 +142,10 @@ pub fn App() -> Element {
             if let Some(path) = last_vault {
                 let root = Utf8PathBuf::from(path);
                 if root.exists() {
-                    match Vault::load(&root) {
-                        Ok(vault) => {
+                    let root_clone = root.clone();
+                    let load_result = tokio::task::spawn_blocking(move || Vault::load(&root_clone)).await;
+                    match load_result {
+                        Ok(Ok(vault)) => {
                             let root_path = vault.root.clone();
                             app_state.write().vault = Some(vault);
                             app_state.write().current_note = None;
@@ -157,8 +159,11 @@ pub fn App() -> Element {
                             sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
                             watch_tx.send(root_path);
                         }
-                        Err(err) => {
+                        Ok(Err(err)) => {
                             tracing::warn!("failed to auto-open last vault: {err}");
+                        }
+                        Err(err) => {
+                            tracing::warn!("vault load panicked: {err}");
                         }
                     }
                 }
@@ -341,7 +346,6 @@ pub fn App() -> Element {
             onmouseleave: move |_| is_resizing.set(false),
 
             header { class: "topbar",
-                div { class: "brand", "Glitch" }
                 button {
                     class: "btn",
                     title: if *sidebar_collapsed.read() { "Show notes panel" } else { "Hide notes panel" },

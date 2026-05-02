@@ -3,7 +3,7 @@ use crate::state::AppState;
 use crate::types::default_emoji;
 use dioxus::prelude::*;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// (title, note_type, folder) — folder is vault-relative, empty for root
 #[component]
@@ -13,12 +13,27 @@ pub fn Sidebar(
     on_create_folder: EventHandler<String>,
     on_move_note: EventHandler<(String, String)>,
 ) -> Element {
-    let tree = state
-        .read()
-        .vault
-        .as_ref()
-        .map(|v| TreeFolder::build(&v.notes, default_emoji));
+    // Dioxus's ondragover runs asynchronously; inject a native sync listener so
+    // WebView2 sees preventDefault() in time and shows the correct drop cursor.
+    use_effect(|| {
+        let _ = document::eval(
+            "if (!window.__glitchDragFix) { window.__glitchDragFix = true; \
+             document.addEventListener('dragover', function(e) { \
+                 e.preventDefault(); \
+                 if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; \
+             }, false); }",
+        );
+    });
+
+    let tree_memo = use_memo(move || {
+        state.read().vault.as_ref().map(|v| TreeFolder::build(&v.notes, default_emoji))
+    });
+    let tree = tree_memo.read().clone();
     let total = tree.as_ref().map(|t| t.note_count()).unwrap_or(0);
+
+    let child_map = use_memo(move || {
+        tree_memo.read().as_ref().map(|t| t.child_map.clone()).unwrap_or_default()
+    });
 
     let expanded = use_signal(|| {
         let mut set = HashSet::new();
@@ -29,6 +44,7 @@ pub fn Sidebar(
         }
         set
     });
+    let expanded_notes: Signal<HashSet<String>> = use_signal(HashSet::new);
 
     let mut new_note_open = use_signal(|| false);
     let mut new_note_title = use_signal(String::new);
@@ -235,6 +251,8 @@ pub fn Sidebar(
                             current: current.clone(),
                             state,
                             dragging_note,
+                            child_map,
+                            expanded_notes,
                         }
                     }
                 } else if let Some(t) = tree {
@@ -246,6 +264,8 @@ pub fn Sidebar(
                             current: current.clone(),
                             state,
                             dragging_note,
+                            child_map,
+                            expanded_notes,
                         }
                     }
                     for folder in t.folders.iter() {
@@ -258,6 +278,8 @@ pub fn Sidebar(
                             state,
                             dragging_note,
                             on_move_note,
+                            child_map,
+                            expanded_notes,
                         }
                     }
                 }
@@ -275,6 +297,8 @@ fn FolderRow(
     state: Signal<AppState>,
     dragging_note: Signal<Option<String>>,
     on_move_note: EventHandler<(String, String)>,
+    child_map: ReadOnlySignal<HashMap<String, Vec<NoteRef>>>,
+    expanded_notes: Signal<HashSet<String>>,
 ) -> Element {
     let is_open = expanded.read().contains(&folder.path);
     let chevron = if is_open { "▾" } else { "▸" };
@@ -327,6 +351,8 @@ fn FolderRow(
                     state,
                     dragging_note,
                     on_move_note,
+                    child_map,
+                    expanded_notes,
                 }
             }
             for note in folder.notes.iter() {
@@ -337,6 +363,8 @@ fn FolderRow(
                     current: current.clone(),
                     state,
                     dragging_note,
+                    child_map,
+                    expanded_notes,
                 }
             }
         }
@@ -350,7 +378,15 @@ fn NoteRow(
     current: Option<NoteId>,
     state: Signal<AppState>,
     dragging_note: Signal<Option<String>>,
+    child_map: ReadOnlySignal<HashMap<String, Vec<NoteRef>>>,
+    expanded_notes: Signal<HashSet<String>>,
 ) -> Element {
+    let children: Vec<NoteRef> =
+        child_map.read().get(note.id.as_str()).cloned().unwrap_or_default();
+    let has_children = !children.is_empty();
+    let note_id_str = note.id.as_str().to_string();
+    let is_expanded = expanded_notes.read().contains(&note_id_str);
+
     let active = current.as_ref() == Some(&note.id);
     let class = if active { "tree-row tree-note active" } else { "tree-row tree-note" };
     let indent = format!("padding-left: {}px", depth * 12 + 22);
@@ -376,12 +412,38 @@ fn NoteRow(
             onclick: {
                 let id = id.clone();
                 let mut state = state;
-                move |_| load_note(&mut state, id.clone())
+                let note_id_str = note_id_str.clone();
+                move |_| {
+                    if has_children {
+                        let mut set = expanded_notes.write();
+                        if !set.remove(&note_id_str) {
+                            set.insert(note_id_str.clone());
+                        }
+                    }
+                    load_note(&mut state, id.clone())
+                }
             },
+            if has_children {
+                span { class: "tree-chevron", if is_expanded { "▾" } else { "▸" } }
+            }
             span { class: "tree-icon", "{note.icon}" }
             span { class: "tree-name", "{note.title}" }
             if kw_count > 0 {
                 span { class: "tree-count", "{kw_count}" }
+            }
+        }
+        if is_expanded {
+            for child in children.iter() {
+                NoteRow {
+                    key: "{child.id.as_str()}",
+                    note: child.clone(),
+                    depth: depth + 1,
+                    current: current.clone(),
+                    state,
+                    dragging_note,
+                    child_map,
+                    expanded_notes,
+                }
             }
         }
     }

@@ -1,7 +1,7 @@
 //! Build a folder tree out of a flat list of notes — used by the sidebar.
 
 use crate::note::{Note, NoteId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TreeFolder {
@@ -13,6 +13,9 @@ pub struct TreeFolder {
     pub folders: Vec<TreeFolder>,
     /// Notes in this folder (not in sub-folders), sorted by title.
     pub notes: Vec<NoteRef>,
+    /// Maps parent note ID → Vec of child NoteRefs (from `parent:` frontmatter).
+    /// Only populated on the root TreeFolder; empty on sub-folders.
+    pub child_map: HashMap<String, Vec<NoteRef>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +24,8 @@ pub struct NoteRef {
     pub title: String,
     pub icon: String,
     pub keywords: Vec<String>,
+    /// Raw `parent:` frontmatter value, if set.
+    pub parent: Option<String>,
 }
 
 impl TreeFolder {
@@ -32,6 +37,8 @@ impl TreeFolder {
         let mut root_folders: BTreeMap<String, TreeFolder> = BTreeMap::new();
         let mut root_notes: Vec<NoteRef> = Vec::new();
 
+        let mut all_refs: Vec<NoteRef> = Vec::new();
+
         for note in notes {
             let icon = note.icon(type_emoji);
             let note_ref = NoteRef {
@@ -39,14 +46,36 @@ impl TreeFolder {
                 title: note.title.clone(),
                 icon,
                 keywords: note.keywords.clone(),
+                parent: note.frontmatter.parent.clone(),
             };
 
+            all_refs.push(note_ref.clone());
             let parents = note.id.parent_components();
             if parents.is_empty() {
                 root_notes.push(note_ref);
                 continue;
             }
             insert(&mut root_folders, &parents, "", note_ref);
+        }
+
+        // Build child_map: resolve each note's `parent:` field to a NoteId string.
+        let mut child_map: HashMap<String, Vec<NoteRef>> = HashMap::new();
+        for note_ref in &all_refs {
+            let Some(ref raw_parent) = note_ref.parent else { continue };
+            let raw_lower = raw_parent.to_lowercase();
+            // Resolve: exact ID → {parent}.md → file-stem → title (case-insensitive)
+            let parent_id = all_refs.iter().find(|n| {
+                n.id.as_str() == raw_parent.as_str()
+                    || n.id.as_str() == format!("{raw_parent}.md")
+                    || n.id.0.file_stem().map(|s| s.to_lowercase()).as_deref() == Some(&raw_lower)
+                    || n.title.to_lowercase() == raw_lower
+            });
+            if let Some(p) = parent_id {
+                child_map
+                    .entry(p.id.as_str().to_string())
+                    .or_default()
+                    .push(note_ref.clone());
+            }
         }
 
         let mut folders: Vec<TreeFolder> = root_folders.into_values().collect();
@@ -61,6 +90,7 @@ impl TreeFolder {
             path: String::new(),
             folders,
             notes: root_notes,
+            child_map,
         }
     }
 
@@ -88,6 +118,7 @@ fn insert(
             path: path.clone(),
             folders: Vec::new(),
             notes: Vec::new(),
+            child_map: HashMap::new(),
         });
 
     if tail.is_empty() {
