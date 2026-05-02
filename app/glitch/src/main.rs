@@ -68,6 +68,13 @@ fn main() {
         )
         .init();
 
+    // WebView2 runs on http://dioxus.index.html which is not a secure origin,
+    // blocking navigator.mediaDevices and SpeechRecognition. Mark it secure.
+    std::env::set_var(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--unsafely-treat-insecure-origin-as-secure=http://dioxus.index.html",
+    );
+
     let window = WindowBuilder::new()
         .with_title("Glitch")
         .with_inner_size(dioxus::desktop::LogicalSize::new(1280.0, 800.0))
@@ -86,6 +93,7 @@ fn main() {
             Config::new()
                 .with_window(window)
                 .with_data_directory(webview_data_dir)
+                .with_disable_context_menu(false)
                 .with_custom_head(format!(
                     "<style>{STYLES}</style>\
                      <script>\
