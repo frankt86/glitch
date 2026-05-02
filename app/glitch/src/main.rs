@@ -95,12 +95,15 @@ fn main() {
                          window.__glitch_drop_id=null;\
                          var el=e.target&&e.target.closest?e.target.closest('[data-note-id]'):null;\
                          window.__glitch_drag=el?el.getAttribute('data-note-id'):null;\
+                         console.log('[glitch] dragstart note='+window.__glitch_drag);\
                      }},true);\
                      document.addEventListener('dragend',function(){{\
+                         console.log('[glitch] dragend');\
                          window.__glitch_drag=null;\
                      }},true);\
                      document.addEventListener('dragenter',function(e){{\
                          e.preventDefault();\
+                         console.log('[glitch] dragenter target='+e.target.tagName+' class='+e.target.className);\
                      }},true);\
                      document.addEventListener('dragover',function(e){{\
                          e.preventDefault();\
@@ -110,6 +113,7 @@ fn main() {
                          e.preventDefault();\
                          window.__glitch_drop_id=window.__glitch_drag;\
                          window.__glitch_drag=null;\
+                         console.log('[glitch] drop fired, drop_id='+window.__glitch_drop_id+' target='+e.target.tagName);\
                      }},true);\
                      </script>"
                 ))

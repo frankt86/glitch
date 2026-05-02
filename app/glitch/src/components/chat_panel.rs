@@ -127,24 +127,39 @@ pub fn ChatPanel(
                             spawn(async move {
                                 let script = r#"
                                     (async function() {
-                                        try {
-                                            const s = await navigator.mediaDevices.getUserMedia({audio:true});
-                                            s.getTracks().forEach(t => t.stop());
-                                        } catch(e) { dioxus.send(''); return; }
+                                        var diag = {
+                                            hasMD: !!(navigator.mediaDevices),
+                                            hasGUM: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+                                            hasSR: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
+                                            protocol: location.protocol,
+                                            href: location.href
+                                        };
+                                        console.log('[glitch] STT diag', JSON.stringify(diag));
+                                        if (!diag.hasSR) {
+                                            dioxus.send('[MIC ERROR] SpeechRecognition not available. protocol=' + diag.protocol + ' href=' + diag.href);
+                                            return;
+                                        }
+                                        if (diag.hasGUM) {
+                                            try {
+                                                const s = await navigator.mediaDevices.getUserMedia({audio:true});
+                                                s.getTracks().forEach(t => t.stop());
+                                            } catch(e) {
+                                                console.log('[glitch] getUserMedia failed:', e.name, e.message);
+                                            }
+                                        }
                                         const R = window.SpeechRecognition || window.webkitSpeechRecognition;
-                                        if (!R) { dioxus.send(''); return; }
                                         const r = new R();
                                         r.lang = 'en-US';
                                         r.interimResults = false;
                                         r.maxAlternatives = 1;
                                         r.onresult = e => dioxus.send(e.results[0][0].transcript);
-                                        r.onerror = () => dioxus.send('');
+                                        r.onerror = e => dioxus.send('[MIC ERROR] ' + (e.error||'unknown') + ' diag=' + JSON.stringify(diag));
                                         r.start();
                                     })();
                                 "#;
                                 let mut eval = document::eval(script);
                                 if let Ok(t) = eval.recv::<String>().await {
-                                    if !t.is_empty() { draft.set(t); }
+                                    if !t.is_empty() { draft.set(t); } // errors start with [MIC ERROR]
                                 }
                                 is_listening.set(false);
                             });
