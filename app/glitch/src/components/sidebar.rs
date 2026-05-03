@@ -1,7 +1,9 @@
 use crate::settings;
 use crate::state::AppState;
 use crate::types::default_emoji;
+use camino::Utf8PathBuf;
 use dioxus::prelude::*;
+use futures::StreamExt;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
 use std::collections::{HashMap, HashSet};
 
@@ -47,6 +49,34 @@ pub fn Sidebar(
     let mut is_unparent_drag_over: Signal<bool> = use_signal(|| false);
     let has_vault = state.read().vault.is_some();
 
+    // Async full-text content search results: (NoteRef, snippet).
+    let mut content_results: Signal<Vec<(NoteRef, String)>> = use_signal(Vec::new);
+
+    // Coroutine: receives (query, list-of-(NoteRef, abs_path)), searches file bodies.
+    let content_search_tx = use_coroutine(
+        move |mut rx: UnboundedReceiver<(String, Vec<(NoteRef, Utf8PathBuf)>)>| async move {
+            while let Some((query, items)) = rx.next().await {
+                content_results.set(vec![]);
+                let q = query.to_ascii_lowercase();
+                let found = tokio::task::spawn_blocking(move || {
+                    let mut out: Vec<(NoteRef, String)> = vec![];
+                    for (note_ref, path) in items {
+                        if let Ok(content) = std::fs::read_to_string(path.as_std_path()) {
+                            let lower = content.to_ascii_lowercase();
+                            if let Some(pos) = lower.find(&q) {
+                                out.push((note_ref, extract_snippet(&content, pos, 90)));
+                            }
+                        }
+                    }
+                    out
+                })
+                .await
+                .unwrap_or_default();
+                content_results.set(found);
+            }
+        },
+    );
+
     let current = state.read().current_note.clone();
 
     let available_types = settings::load_types();
@@ -66,7 +96,8 @@ pub fn Sidebar(
     let query = search_query.read().trim().to_lowercase();
     let searching = !query.is_empty();
 
-    let search_results: Vec<NoteRef> = if searching {
+    // Title matches — instant, in-memory.
+    let title_results: Vec<NoteRef> = if searching {
         tree.as_ref()
             .map(|t| {
                 all_refs(t)
@@ -78,6 +109,15 @@ pub fn Sidebar(
     } else {
         vec![]
     };
+
+    // IDs already shown via title match — exclude from content results.
+    let title_ids: HashSet<String> = title_results.iter().map(|n| n.id.as_str().to_string()).collect();
+    let body_results: Vec<(NoteRef, String)> = content_results
+        .read()
+        .iter()
+        .filter(|(n, _)| !title_ids.contains(n.id.as_str()))
+        .cloned()
+        .collect();
 
     rsx! {
         nav { class: "sidebar",
@@ -117,12 +157,45 @@ pub fn Sidebar(
                         class: "sidebar-search",
                         placeholder: "Search notes…",
                         value: "{search_query.read()}",
-                        oninput: move |evt: FormEvent| search_query.set(evt.value()),
+                        oninput: move |evt: FormEvent| {
+                            let q = evt.value();
+                            search_query.set(q.clone());
+                            let trimmed = q.trim().to_ascii_lowercase();
+                            if trimmed.is_empty() {
+                                content_results.set(vec![]);
+                            } else {
+                                // Send note refs + paths to the async content search.
+                                let items: Vec<(NoteRef, Utf8PathBuf)> = state
+                                    .read()
+                                    .vault
+                                    .as_ref()
+                                    .map(|v| {
+                                        v.notes
+                                            .iter()
+                                            .map(|n| {
+                                                let nr = NoteRef {
+                                                    id: n.id.clone(),
+                                                    title: n.title.clone(),
+                                                    icon: n.icon(default_emoji),
+                                                    keywords: n.keywords.clone(),
+                                                    parent: n.frontmatter.parent.clone(),
+                                                };
+                                                (nr, n.absolute_path.clone())
+                                            })
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                content_search_tx.send((trimmed, items));
+                            }
+                        },
                     }
                     if searching {
                         button {
                             class: "sidebar-search-clear",
-                            onclick: move |_| search_query.set(String::new()),
+                            onclick: move |_| {
+                                search_query.set(String::new());
+                                content_results.set(vec![]);
+                            },
                             "×"
                         }
                     }
@@ -218,10 +291,10 @@ pub fn Sidebar(
             }
             div { class: "tree",
                 if searching {
-                    if search_results.is_empty() {
+                    if title_results.is_empty() && body_results.is_empty() {
                         div { class: "sidebar-search-empty", "No notes match" }
                     }
-                    for note in search_results.iter() {
+                    for note in title_results.iter() {
                         NoteRow {
                             key: "{note.id.as_str()}",
                             note: note.clone(),
@@ -232,6 +305,27 @@ pub fn Sidebar(
                             child_map,
                             expanded_notes,
                             on_reparent,
+                        }
+                    }
+                    if !body_results.is_empty() {
+                        if !title_results.is_empty() {
+                            div { class: "search-section-label", "In content" }
+                        }
+                        for (note, snippet) in body_results.iter() {
+                            div { class: "search-content-row",
+                                NoteRow {
+                                    key: "{note.id.as_str()}",
+                                    note: note.clone(),
+                                    depth: 0u32,
+                                    current: current.clone(),
+                                    state,
+                                    dragging_note,
+                                    child_map,
+                                    expanded_notes,
+                                    on_reparent,
+                                }
+                                p { class: "search-snippet", "{snippet}" }
+                            }
                         }
                     }
                 } else if let Some(t) = tree {
@@ -579,6 +673,32 @@ fn all_refs(tree: &TreeFolder) -> Vec<NoteRef> {
         out.extend(children.iter().cloned());
     }
     out
+}
+
+/// Extract a ~`window`-char snippet centred on `byte_pos` in `content`,
+/// trimmed to word boundaries and with leading/trailing `…` as needed.
+fn extract_snippet(content: &str, byte_pos: usize, window: usize) -> String {
+    let half = window / 2;
+    let start = byte_pos.saturating_sub(half);
+    let end = (byte_pos + half).min(content.len());
+    // Snap to char boundaries.
+    let start = content
+        .char_indices()
+        .map(|(i, _)| i)
+        .filter(|&i| i >= start)
+        .next()
+        .unwrap_or(start);
+    let end = content
+        .char_indices()
+        .map(|(i, _)| i)
+        .filter(|&i| i <= end)
+        .last()
+        .unwrap_or(end);
+    let raw = content[start..end].replace('\n', " ");
+    let trimmed = raw.trim().to_string();
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if end < content.len() { "…" } else { "" };
+    format!("{prefix}{trimmed}{suffix}")
 }
 
 fn load_note(state: &mut Signal<AppState>, id: NoteId) {

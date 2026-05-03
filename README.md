@@ -72,7 +72,7 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 - **Safe note switching** — switching to another note while editing auto-saves the current note first; deleted notes go to the OS Recycle Bin (recoverable); Ctrl+S / File → Save saves immediately at any time
 - **Frontmatter detail tab** — structured fields per note type (article, meeting, book, person, project); editable title pinned above the editor
 - **Note types & templates** — built-in types: note, task, meeting, book, person, project, bible (SOAP method), sermon, prayer, daily journal, recipe, research, goal, quote; register custom types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
-- **Sidebar search** — live title search above the note tree; filters across all folders in real time; clear button to restore the tree
+- **Sidebar search** — live title search above the note tree; filters across all folders in real time; async full-text body search runs in parallel and shows matching notes with a content snippet below the title results; clear button to restore the tree
 - **Native application menu bar** — OS-native menu bar with File (New Vault…, Open Vault… Ctrl+O, Save Ctrl+S, Daily Note Ctrl+D, Extract URL…, Settings…), View (Notes Panel ✓, Claude Panel ✓, Graph… Ctrl+G), and Sync (Sync Now) submenus; sync status visible at a glance in the topbar; ⊣/⊢ icon buttons at the edges collapse each panel
 - **Resizable sidebar** — drag the divider between the note list and editor to set any width from 160 px to 520 px; collapse the notes panel or the Claude panel with the ⊣/⊢ buttons in the topbar
 - **Persistent vault** — last-opened vault auto-reopens on next launch; vault path saved to `%APPDATA%\Glitch\settings.json`
