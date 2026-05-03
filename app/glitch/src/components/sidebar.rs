@@ -5,7 +5,13 @@ use camino::Utf8PathBuf;
 use dioxus::prelude::*;
 use futures::StreamExt;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+#[derive(Clone, PartialEq)]
+enum SidebarView {
+    Notes,
+    Tags,
+}
 
 /// (title, note_type, folder) — folder is vault-relative, empty for root
 #[component]
@@ -48,6 +54,8 @@ pub fn Sidebar(
     let mut is_root_drag_over: Signal<bool> = use_signal(|| false);
     let mut is_unparent_drag_over: Signal<bool> = use_signal(|| false);
     let has_vault = state.read().vault.is_some();
+    let mut sidebar_view = use_signal(|| SidebarView::Notes);
+    let mut selected_tag: Signal<Option<String>> = use_signal(|| None);
 
     // Async full-text content search results: (NoteRef, snippet).
     let mut content_results: Signal<Vec<(NoteRef, String)>> = use_signal(Vec::new);
@@ -119,6 +127,47 @@ pub fn Sidebar(
         .cloned()
         .collect();
 
+    // Collect all tags → note count, sorted alphabetically.
+    let all_tags: BTreeMap<String, usize> = {
+        let mut map: BTreeMap<String, usize> = BTreeMap::new();
+        if let Some(vault) = state.read().vault.as_ref() {
+            for note in &vault.notes {
+                for tag in &note.frontmatter.tags {
+                    if !tag.is_empty() {
+                        *map.entry(tag.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        map
+    };
+
+    // Notes for the currently selected tag.
+    let tagged_notes: Vec<NoteRef> = {
+        let tag = selected_tag.read().clone();
+        match tag {
+            None => vec![],
+            Some(ref t) => {
+                if let Some(vault) = state.read().vault.as_ref() {
+                    vault
+                        .notes
+                        .iter()
+                        .filter(|n| n.frontmatter.tags.iter().any(|tg| tg == t))
+                        .map(|n| NoteRef {
+                            id: n.id.clone(),
+                            title: n.title.clone(),
+                            icon: n.icon(default_emoji),
+                            keywords: n.keywords.clone(),
+                            parent: n.frontmatter.parent.clone(),
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                }
+            }
+        }
+    };
+
     rsx! {
         nav { class: "sidebar",
             div { class: "sidebar-header",
@@ -152,6 +201,20 @@ pub fn Sidebar(
                 }
             }
             if has_vault {
+                div { class: "sidebar-view-toggle",
+                    button {
+                        class: if *sidebar_view.read() == SidebarView::Notes { "sidebar-view-btn active" } else { "sidebar-view-btn" },
+                        onclick: move |_| sidebar_view.set(SidebarView::Notes),
+                        "Notes"
+                    }
+                    button {
+                        class: if *sidebar_view.read() == SidebarView::Tags { "sidebar-view-btn active" } else { "sidebar-view-btn" },
+                        onclick: move |_| sidebar_view.set(SidebarView::Tags),
+                        "Tags"
+                    }
+                }
+            }
+            if has_vault && *sidebar_view.read() == SidebarView::Notes {
                 div { class: "sidebar-search-wrap",
                     input {
                         class: "sidebar-search",
@@ -289,115 +352,171 @@ pub fn Sidebar(
                     button { class: "btn btn-primary", onclick: submit, "Create" }
                 }
             }
-            div { class: "tree",
-                if searching {
-                    if title_results.is_empty() && body_results.is_empty() {
-                        div { class: "sidebar-search-empty", "No notes match" }
-                    }
-                    for note in title_results.iter() {
-                        NoteRow {
-                            key: "{note.id.as_str()}",
-                            note: note.clone(),
-                            depth: 0u32,
-                            current: current.clone(),
-                            state,
-                            dragging_note,
-                            child_map,
-                            expanded_notes,
-                            on_reparent,
+            if *sidebar_view.read() == SidebarView::Notes {
+                div { class: "tree",
+                    if searching {
+                        if title_results.is_empty() && body_results.is_empty() {
+                            div { class: "sidebar-search-empty", "No notes match" }
                         }
-                    }
-                    if !body_results.is_empty() {
-                        if !title_results.is_empty() {
-                            div { class: "search-section-label", "In content" }
+                        for note in title_results.iter() {
+                            NoteRow {
+                                key: "{note.id.as_str()}",
+                                note: note.clone(),
+                                depth: 0u32,
+                                current: current.clone(),
+                                state,
+                                dragging_note,
+                                child_map,
+                                expanded_notes,
+                                on_reparent,
+                            }
                         }
-                        for (note, snippet) in body_results.iter() {
-                            div { class: "search-content-row",
-                                NoteRow {
-                                    key: "{note.id.as_str()}",
-                                    note: note.clone(),
-                                    depth: 0u32,
-                                    current: current.clone(),
-                                    state,
-                                    dragging_note,
-                                    child_map,
-                                    expanded_notes,
-                                    on_reparent,
+                        if !body_results.is_empty() {
+                            if !title_results.is_empty() {
+                                div { class: "search-section-label", "In content" }
+                            }
+                            for (note, snippet) in body_results.iter() {
+                                div { class: "search-content-row",
+                                    NoteRow {
+                                        key: "{note.id.as_str()}",
+                                        note: note.clone(),
+                                        depth: 0u32,
+                                        current: current.clone(),
+                                        state,
+                                        dragging_note,
+                                        child_map,
+                                        expanded_notes,
+                                        on_reparent,
+                                    }
+                                    p { class: "search-snippet", "{snippet}" }
                                 }
-                                p { class: "search-snippet", "{snippet}" }
+                            }
+                        }
+                    } else if let Some(t) = tree {
+                        for note in t.notes.iter() {
+                            NoteRow {
+                                key: "{note.id.as_str()}",
+                                note: note.clone(),
+                                depth: 0u32,
+                                current: current.clone(),
+                                state,
+                                dragging_note,
+                                child_map,
+                                expanded_notes,
+                                on_reparent,
+                            }
+                        }
+                        for folder in t.folders.iter() {
+                            FolderRow {
+                                key: "{folder.path}",
+                                folder: folder.clone(),
+                                depth: 0u32,
+                                current: current.clone(),
+                                expanded,
+                                state,
+                                dragging_note,
+                                on_move_note,
+                                on_delete_folder,
+                                on_reparent,
+                                child_map,
+                                expanded_notes,
                             }
                         }
                     }
-                } else if let Some(t) = tree {
-                    for note in t.notes.iter() {
-                        NoteRow {
-                            key: "{note.id.as_str()}",
-                            note: note.clone(),
-                            depth: 0u32,
-                            current: current.clone(),
-                            state,
-                            dragging_note,
-                            child_map,
-                            expanded_notes,
-                            on_reparent,
-                        }
-                    }
-                    for folder in t.folders.iter() {
-                        FolderRow {
-                            key: "{folder.path}",
-                            folder: folder.clone(),
-                            depth: 0u32,
-                            current: current.clone(),
-                            expanded,
-                            state,
-                            dragging_note,
-                            on_move_note,
-                            on_delete_folder,
-                            on_reparent,
-                            child_map,
-                            expanded_notes,
-                        }
-                    }
-                }
-                if has_vault {
-                    div {
-                        class: if *is_root_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
-                        ondragover: move |evt| evt.prevent_default(),
-                        ondragenter: move |_| is_root_drag_over.set(true),
-                        ondragleave: move |_| is_root_drag_over.set(false),
-                        ondrop: move |_| {
-                            is_root_drag_over.set(false);
-                            spawn(async move {
-                                let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
-                                let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
-                                let note_id = js_id.or_else(|| dragging_note.read().clone());
-                                if let Some(id) = note_id {
-                                    dragging_note.set(None);
-                                    on_move_note.call((id, String::new()));
-                                }
-                            });
-                        },
-                        "↑ move to root"
-                    }
-                    if dragging_note.read().is_some() {
+                    if has_vault {
                         div {
-                            class: if *is_unparent_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
+                            class: if *is_root_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
                             ondragover: move |evt| evt.prevent_default(),
-                            ondragenter: move |_| is_unparent_drag_over.set(true),
-                            ondragleave: move |_| is_unparent_drag_over.set(false),
+                            ondragenter: move |_| is_root_drag_over.set(true),
+                            ondragleave: move |_| is_root_drag_over.set(false),
                             ondrop: move |_| {
-                                is_unparent_drag_over.set(false);
+                                is_root_drag_over.set(false);
                                 spawn(async move {
                                     let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
                                     let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
                                     let note_id = js_id.or_else(|| dragging_note.read().clone());
                                     if let Some(id) = note_id {
                                         dragging_note.set(None);
-                                        on_reparent.call((id, None));
+                                        on_move_note.call((id, String::new()));
                                     }
                                 });
                             },
-                            "✂ remove parent"
+                            "↑ move to root"
+                        }
+                        if dragging_note.read().is_some() {
+                            div {
+                                class: if *is_unparent_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
+                                ondragover: move |evt| evt.prevent_default(),
+                                ondragenter: move |_| is_unparent_drag_over.set(true),
+                                ondragleave: move |_| is_unparent_drag_over.set(false),
+                                ondrop: move |_| {
+                                    is_unparent_drag_over.set(false);
+                                    spawn(async move {
+                                        let mut ev = document::eval("dioxus.send(window.__glitch_drop_id||'')");
+                                        let js_id = ev.recv::<String>().await.ok().filter(|s| !s.is_empty());
+                                        let note_id = js_id.or_else(|| dragging_note.read().clone());
+                                        if let Some(id) = note_id {
+                                            dragging_note.set(None);
+                                            on_reparent.call((id, None));
+                                        }
+                                    });
+                                },
+                                "✂ remove parent"
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Tags view
+                div { class: "tag-browser",
+                    if all_tags.is_empty() {
+                        div { class: "tag-empty", "No tags found. Add tags: to your note frontmatter." }
+                    } else {
+                        div { class: "tag-chips",
+                            for (tag, count) in all_tags.iter() {
+                                {
+                                    let tag = tag.clone();
+                                    let tag2 = tag.clone();
+                                    let is_sel = selected_tag.read().as_deref() == Some(tag.as_str());
+                                    rsx! {
+                                        button {
+                                            key: "{tag}",
+                                            class: if is_sel { "tag-chip tag-chip-active" } else { "tag-chip" },
+                                            onclick: move |_| {
+                                                let mut sel = selected_tag;
+                                                if sel.read().as_deref() == Some(tag2.as_str()) {
+                                                    sel.set(None);
+                                                } else {
+                                                    sel.set(Some(tag2.clone()));
+                                                }
+                                            },
+                                            "#{tag} "
+                                            span { class: "tag-count", "{count}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(active_tag) = selected_tag.read().clone() {
+                            div { class: "tag-notes-header", "#{active_tag}" }
+                            if tagged_notes.is_empty() {
+                                div { class: "tag-empty", "No notes with this tag." }
+                            }
+                            for note in tagged_notes.iter() {
+                                {
+                                    let id = note.id.clone();
+                                    let mut state2 = state;
+                                    rsx! {
+                                        div {
+                                            key: "{note.id.as_str()}",
+                                            class: if current.as_ref() == Some(&note.id) { "tree-row tree-note active" } else { "tree-row tree-note" },
+                                            onclick: move |_| load_note(&mut state2, id.clone()),
+                                            span { class: "tree-icon", "{note.icon}" }
+                                            span { class: "tree-name", "{note.title}" }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
