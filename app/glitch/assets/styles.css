@@ -586,6 +586,36 @@ html, body, #main {
     font-weight: 600;
 }
 
+.chat-header-actions { display: flex; align-items: center; gap: 8px; }
+.chat-ctx-btn { font-size: 15px; opacity: 0.6; }
+.chat-ctx-btn:hover, .chat-ctx-btn.active { opacity: 1; color: var(--accent); }
+
+.context-panel {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elevated);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+}
+.context-section { display: flex; flex-direction: column; gap: 3px; }
+.context-label { color: var(--fg-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+.context-value { color: var(--fg); }
+.context-muted { color: var(--fg-muted); font-style: italic; }
+.context-code { font-family: var(--font-mono); color: var(--accent); font-size: 11px; }
+.context-path { word-break: break-all; }
+.context-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.context-chip {
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 11px;
+    color: var(--fg);
+    font-family: var(--font-mono);
+}
+
 .chat-history {
     flex: 1;
     overflow-y: auto;

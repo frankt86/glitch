@@ -10,11 +10,21 @@ pub fn ChatPanel(
     claude_status: Signal<ClaudeStatus>,
     on_send: EventHandler<String>,
     on_interrupt: EventHandler<()>,
+    context_note: Option<String>,
+    allowed_tools: String,
+    agent_instructions_path: String,
 ) -> Element {
     let mut draft = use_signal(String::new);
     let mut palette_index = use_signal(|| 0usize);
     let mut is_listening = use_signal(|| false);
+    let mut context_open = use_signal(|| false);
     let entries = history.read().clone();
+
+    let tools: Vec<String> = allowed_tools
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
 
     let send = move |_| {
         let text = draft.read().trim().to_string();
@@ -32,8 +42,44 @@ pub fn ChatPanel(
         aside { class: "chat",
             header { class: "chat-header",
                 span { "Claude" }
-                if matches!(*status.read(), SessionStatus::Ready) {
-                    button { class: "btn-link", onclick: move |_| on_interrupt.call(()), "stop" }
+                div { class: "chat-header-actions",
+                    button {
+                        class: if *context_open.read() { "btn-link chat-ctx-btn active" } else { "btn-link chat-ctx-btn" },
+                        title: "Show context sent to Claude",
+                        onclick: move |_| { let next = !*context_open.read(); context_open.set(next); },
+                        "ℹ"
+                    }
+                    if matches!(*status.read(), SessionStatus::Ready) {
+                        button { class: "btn-link", onclick: move |_| on_interrupt.call(()), "stop" }
+                    }
+                }
+            }
+            if *context_open.read() {
+                div { class: "context-panel",
+                    div { class: "context-section",
+                        div { class: "context-label", "Open note" }
+                        div { class: "context-value",
+                            if let Some(path) = &context_note {
+                                code { class: "context-code", "{path}" }
+                            } else {
+                                span { class: "context-muted", "none" }
+                            }
+                        }
+                    }
+                    div { class: "context-section",
+                        div { class: "context-label", "Auto-approved tools" }
+                        div { class: "context-chips",
+                            for tool in tools.iter() {
+                                span { class: "context-chip", "{tool}" }
+                            }
+                        }
+                    }
+                    div { class: "context-section",
+                        div { class: "context-label", "Agent instructions" }
+                        div { class: "context-value",
+                            code { class: "context-code context-path", "{agent_instructions_path}" }
+                        }
+                    }
                 }
             }
             div { class: "chat-history",

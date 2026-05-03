@@ -618,6 +618,9 @@ pub fn App() -> Element {
                         history: chat_history,
                         status: session_status,
                         claude_status,
+                        context_note: app_state.read().current_note.as_ref().map(|id| id.as_str().to_string()),
+                        allowed_tools: app_settings.read().allowed_tools_silent.clone(),
+                        agent_instructions_path: app_settings.read().agent_instructions_path.to_string(),
                         on_send: {
                             let mut history = chat_history;
                             let mut app_state = app_state;
