@@ -252,15 +252,55 @@ template = "project.md"
     Ok(())
 }
 
+/// A named preset for which Claude tools are auto-approved vs. denied.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PermissionProfile {
+    pub name: String,
+    /// Comma-separated tools that bypass the approval modal.
+    pub allowed_tools: String,
+    /// Comma-separated tools that are always denied (never prompted).
+    #[serde(default)]
+    pub disallowed_tools: String,
+}
+
+impl PermissionProfile {
+    pub fn builtin_read_only() -> Self {
+        Self { name: "Read-only".into(), allowed_tools: "Read,Glob,Grep,LS".into(), disallowed_tools: String::new() }
+    }
+    pub fn builtin_standard() -> Self {
+        Self { name: "Standard".into(), allowed_tools: "Read,Glob,Grep,LS,TodoWrite".into(), disallowed_tools: String::new() }
+    }
+    pub fn builtin_power() -> Self {
+        Self { name: "Power".into(), allowed_tools: "Read,Glob,Grep,LS,TodoWrite,Write,Edit,Bash,WebSearch,WebFetch".into(), disallowed_tools: String::new() }
+    }
+}
+
+fn default_profiles() -> Vec<PermissionProfile> {
+    vec![
+        PermissionProfile::builtin_read_only(),
+        PermissionProfile::builtin_standard(),
+        PermissionProfile::builtin_power(),
+    ]
+}
+
+fn default_active_profile() -> String {
+    "Standard".into()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppSettings {
     /// Path to the `claude` CLI. Use just `"claude"` to resolve from PATH.
     #[serde(default = "default_claude_binary")]
     pub claude_binary: String,
-    /// Tools that auto-approve without showing a modal. Comma-separated.
-    /// Anything not on this list triggers the permission prompt.
+    /// Fallback allowed-tools list used when no named profile is active.
     #[serde(default = "default_allowed_tools")]
     pub allowed_tools_silent: String,
+    /// Named permission profiles. Selecting one sets the tool allow/deny lists.
+    #[serde(default = "default_profiles")]
+    pub profiles: Vec<PermissionProfile>,
+    /// Name of the currently active permission profile. Empty = use `allowed_tools_silent`.
+    #[serde(default = "default_active_profile")]
+    pub active_profile: String,
     /// Auto-sync the vault to GitHub on a timer (off by default).
     #[serde(default)]
     pub auto_sync: bool,
@@ -287,6 +327,8 @@ impl Default for AppSettings {
         Self {
             claude_binary: default_claude_binary(),
             allowed_tools_silent: default_allowed_tools(),
+            profiles: default_profiles(),
+            active_profile: default_active_profile(),
             auto_sync: false,
             auto_sync_interval_minutes: default_sync_interval(),
             commit_chats_to_git: false,

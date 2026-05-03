@@ -619,7 +619,13 @@ pub fn App() -> Element {
                         status: session_status,
                         claude_status,
                         context_note: app_state.read().current_note.as_ref().map(|id| id.as_str().to_string()),
-                        allowed_tools: app_settings.read().allowed_tools_silent.clone(),
+                        active_profile: app_settings.read().active_profile.clone(),
+                        allowed_tools: {
+                            let s = app_settings.read();
+                            s.profiles.iter().find(|p| p.name == s.active_profile)
+                                .map(|p| p.allowed_tools.clone())
+                                .unwrap_or_else(|| s.allowed_tools_silent.clone())
+                        },
                         agent_instructions_path: app_settings.read().agent_instructions_path.to_string(),
                         on_send: {
                             let mut history = chat_history;
@@ -680,8 +686,17 @@ fn build_session_config(
     let s = settings.read();
     let system_prompt =
         std::fs::read_to_string(s.agent_instructions_path.as_std_path()).ok();
+    let active = s.profiles.iter().find(|p| p.name == s.active_profile).cloned();
+    let (allowed, disallowed) = match active {
+        Some(p) => (
+            p.allowed_tools,
+            if p.disallowed_tools.is_empty() { None } else { Some(p.disallowed_tools) },
+        ),
+        None => (s.allowed_tools_silent.clone(), None),
+    };
     let mut cfg = SessionConfig {
-        allowed_tools: Some(s.allowed_tools_silent.clone()),
+        allowed_tools: Some(allowed),
+        disallowed_tools: disallowed,
         system_prompt_append: system_prompt,
         ..Default::default()
     };

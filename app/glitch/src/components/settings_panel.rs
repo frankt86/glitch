@@ -1,4 +1,4 @@
-use crate::settings::{self, AppSettings, NoteTypeConfig};
+use crate::settings::{self, AppSettings, NoteTypeConfig, PermissionProfile};
 use dioxus::prelude::*;
 
 #[component]
@@ -68,6 +68,7 @@ pub fn SettingsPanel(
                             }
                         }
                     }
+                    PermissionProfilesSection { draft }
                     Section { title: "Git sync",
                         Field { label: "Auto-sync vault to GitHub",
                             label { class: "settings-toggle",
@@ -190,6 +191,127 @@ fn NoteTypeRow(cfg: NoteTypeConfig) -> Element {
             span { class: "note-type-name", "{cfg.name}" }
             if !cfg.template.is_empty() {
                 span { class: "note-type-template", "{cfg.template}" }
+            }
+        }
+    }
+}
+
+static BUILTIN_NAMES: &[&str] = &["Read-only", "Standard", "Power"];
+
+#[component]
+fn PermissionProfilesSection(draft: Signal<AppSettings>) -> Element {
+    let mut new_name = use_signal(String::new);
+    let mut new_tools = use_signal(String::new);
+    let mut add_open = use_signal(|| false);
+
+    let active = draft.read().active_profile.clone();
+    let profiles = draft.read().profiles.clone();
+
+    rsx! {
+        section { class: "settings-section",
+            h3 { class: "settings-section-title", "Permission profiles" }
+            div { class: "settings-field",
+                label { class: "settings-label", "Active profile" }
+                div { class: "settings-control",
+                    div { class: "perm-profile-grid",
+                        for profile in profiles.iter() {
+                            {
+                                let pname = profile.name.clone();
+                                let pname2 = pname.clone();
+                                let tools_preview: String = profile.allowed_tools
+                                    .split(',')
+                                    .map(str::trim)
+                                    .take(4)
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                let is_active = active == pname;
+                                let is_builtin = BUILTIN_NAMES.contains(&pname.as_str());
+                                rsx! {
+                                    div {
+                                        key: "{pname}",
+                                        class: if is_active { "perm-profile-card active" } else { "perm-profile-card" },
+                                        onclick: move |_| draft.write().active_profile = pname2.clone(),
+                                        div { class: "perm-profile-name", "{pname}" }
+                                        div { class: "perm-profile-tools", "{tools_preview}…" }
+                                        if !is_builtin {
+                                            button {
+                                                class: "perm-profile-del",
+                                                title: "Delete profile",
+                                                onclick: {
+                                                    let pname = pname.clone();
+                                                    move |evt: MouseEvent| {
+                                                        evt.stop_propagation();
+                                                        let mut d = draft.write();
+                                                        d.profiles.retain(|p| p.name != pname);
+                                                        if d.active_profile == pname {
+                                                            d.active_profile = "Standard".into();
+                                                        }
+                                                    }
+                                                },
+                                                "×"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        button {
+                            class: "perm-profile-add-btn",
+                            onclick: move |_| add_open.set(true),
+                            "+ Custom"
+                        }
+                    }
+                    if *add_open.read() {
+                        div { class: "perm-profile-add-form",
+                            input {
+                                class: "settings-input settings-input-narrow",
+                                placeholder: "Profile name",
+                                value: "{new_name.read()}",
+                                oninput: move |e: FormEvent| new_name.set(e.value()),
+                            }
+                            input {
+                                class: "settings-input",
+                                placeholder: "Allowed tools (comma-separated)",
+                                value: "{new_tools.read()}",
+                                oninput: move |e: FormEvent| new_tools.set(e.value()),
+                            }
+                            div { class: "perm-profile-add-actions",
+                                button {
+                                    class: "btn btn-primary",
+                                    onclick: move |_| {
+                                        let name = new_name.read().trim().to_string();
+                                        let tools = new_tools.read().trim().to_string();
+                                        if !name.is_empty() && !tools.is_empty() {
+                                            draft.write().profiles.push(PermissionProfile {
+                                                name: name.clone(),
+                                                allowed_tools: tools,
+                                                disallowed_tools: String::new(),
+                                            });
+                                            draft.write().active_profile = name;
+                                            new_name.set(String::new());
+                                            new_tools.set(String::new());
+                                            add_open.set(false);
+                                        }
+                                    },
+                                    "Add"
+                                }
+                                button {
+                                    class: "btn",
+                                    onclick: move |_| {
+                                        new_name.set(String::new());
+                                        new_tools.set(String::new());
+                                        add_open.set(false);
+                                    },
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
+                    div { class: "settings-hint",
+                        "Profiles set which tools auto-approve vs. show a permission modal. "
+                        "Changes take effect on the next session restart."
+                    }
+                }
             }
         }
     }

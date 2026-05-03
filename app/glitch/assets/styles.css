@@ -929,6 +929,64 @@ html, body, #main {
     line-height: 1.4;
 }
 .settings-hint .mono { font-family: var(--font-mono); font-size: 10px; }
+
+/* Permission profiles */
+.perm-profile-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+.perm-profile-card {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    min-width: 110px;
+    background: var(--bg-input);
+    transition: border-color 0.12s, background 0.12s;
+}
+.perm-profile-card:hover { border-color: var(--accent); }
+.perm-profile-card.active { border-color: var(--accent); background: var(--accent-bg); }
+.perm-profile-name { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+.perm-profile-tools { font-size: 11px; color: var(--fg-muted); font-family: var(--font-mono); }
+.perm-profile-del {
+    position: absolute;
+    top: 4px; right: 6px;
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.perm-profile-del:hover { color: var(--error); }
+.perm-profile-add-btn {
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    cursor: pointer;
+    background: none;
+    color: var(--fg-muted);
+    font-size: 13px;
+    align-self: flex-start;
+    transition: border-color 0.12s, color 0.12s;
+}
+.perm-profile-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+.perm-profile-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-input);
+}
+.perm-profile-add-actions { display: flex; gap: 8px; }
+
 .note-types-list {
     display: flex;
     flex-direction: column;

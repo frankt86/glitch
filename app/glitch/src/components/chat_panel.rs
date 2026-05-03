@@ -11,6 +11,7 @@ pub fn ChatPanel(
     on_send: EventHandler<String>,
     on_interrupt: EventHandler<()>,
     context_note: Option<String>,
+    active_profile: String,
     allowed_tools: String,
     agent_instructions_path: String,
 ) -> Element {
@@ -63,6 +64,16 @@ pub fn ChatPanel(
                                 code { class: "context-code", "{path}" }
                             } else {
                                 span { class: "context-muted", "none" }
+                            }
+                        }
+                    }
+                    div { class: "context-section",
+                        div { class: "context-label", "Permission profile" }
+                        div { class: "context-value",
+                            if active_profile.is_empty() {
+                                span { class: "context-muted", "custom" }
+                            } else {
+                                code { class: "context-code", "{active_profile}" }
                             }
                         }
                     }
