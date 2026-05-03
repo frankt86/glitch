@@ -229,6 +229,49 @@ pub fn GlitchTableView(table: GlitchTable, on_change: EventHandler<GlitchTable>)
                             }
                         }
                     }
+                    {
+                        // Aggregate footer: sum for Number/Formula cols, count label in last slot.
+                        let any_numeric = table.schema.columns.iter().any(|c| {
+                            matches!(c.col_type, ColType::Number | ColType::Formula)
+                        });
+                        if any_numeric || !visible_rows.is_empty() {
+                            let row_count = visible_rows.len();
+                            rsx! {
+                                tfoot {
+                                    tr { class: "gtable-agg-row",
+                                        for (ci, col) in table.schema.columns.iter().enumerate() {
+                                            {
+                                                let is_numeric = matches!(col.col_type, ColType::Number | ColType::Formula);
+                                                let cell_text = if is_numeric {
+                                                    let sum: f64 = visible_rows.iter()
+                                                        .map(|&ri| {
+                                                            table.computed_value(ri, ci)
+                                                                .as_f64()
+                                                                .unwrap_or(0.0)
+                                                        })
+                                                        .sum();
+                                                    format!("Σ {:.2}", sum)
+                                                } else if ci == 0 {
+                                                    format!("{row_count} rows")
+                                                } else {
+                                                    String::new()
+                                                };
+                                                rsx! {
+                                                    td { class: "gtable-agg-cell",
+                                                        key: "{ci}",
+                                                        "{cell_text}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        td { class: "gtable-agg-cell" }
+                                    }
+                                }
+                            }
+                        } else {
+                            rsx! {}
+                        }
+                    }
                 }
             }
         }

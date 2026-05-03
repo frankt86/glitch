@@ -122,9 +122,26 @@ fn make_default_table_block() -> String {
 
 /// Returns (display_label, yaml_key, input_hint) for the Detail tab.
 /// hint: "text" | "url" | "textarea" | "tags" | "type-select"
-fn fields_for_type(note_type: &str) -> Vec<(&'static str, &'static str, &'static str)> {
-    match note_type {
-        "article" => vec![
+///
+/// Checks types.toml `fields` first; falls back to built-in defaults.
+fn fields_for_type(note_type: &str) -> Vec<(String, String, String)> {
+    // Check user-configured fields in types.toml.
+    let types = settings::load_types();
+    if let Some(cfg) = types.iter().find(|t| t.name.eq_ignore_ascii_case(note_type)) {
+        if !cfg.fields.is_empty() {
+            // Always prepend Type selector then the user's fields.
+            let mut out = vec![
+                ("Type".to_string(), "type".to_string(), "type-select".to_string()),
+            ];
+            for f in &cfg.fields {
+                out.push((f.label.clone(), f.key.clone(), f.hint.clone()));
+            }
+            return out;
+        }
+    }
+    // Built-in defaults.
+    let rows: &[(&str, &str, &str)] = match note_type {
+        "article" => &[
             ("Type", "type", "type-select"),
             ("Source URL", "source", "url"),
             ("Author", "author", "text"),
@@ -132,36 +149,37 @@ fn fields_for_type(note_type: &str) -> Vec<(&'static str, &'static str, &'static
             ("Excerpt", "excerpt", "textarea"),
             ("Tags", "tags", "tags"),
         ],
-        "meeting" => vec![
+        "meeting" => &[
             ("Type", "type", "type-select"),
             ("Date", "date", "text"),
             ("Attendees", "attendees", "text"),
             ("Tags", "tags", "tags"),
         ],
-        "book" => vec![
+        "book" => &[
             ("Type", "type", "type-select"),
             ("Author", "author", "text"),
             ("Started", "started", "text"),
             ("Finished", "finished", "text"),
             ("Tags", "tags", "tags"),
         ],
-        "person" => vec![
+        "person" => &[
             ("Type", "type", "type-select"),
             ("Role", "role", "text"),
             ("Contact", "contact", "text"),
             ("Tags", "tags", "tags"),
         ],
-        "project" => vec![
+        "project" => &[
             ("Type", "type", "type-select"),
             ("Status", "status", "text"),
             ("Started", "started", "text"),
             ("Tags", "tags", "tags"),
         ],
-        _ => vec![
+        _ => &[
             ("Type", "type", "type-select"),
             ("Tags", "tags", "tags"),
         ],
-    }
+    };
+    rows.iter().map(|(a, b, c)| (a.to_string(), b.to_string(), c.to_string())).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -731,7 +749,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         }
                         for (label, key, hint) in fields_for_type(&note_type) {
                             {
-                                let raw_val = fm::get_field(&yaml, key);
+                                let raw_val = fm::get_field(&yaml, &key);
                                 let display_val =
                                     if hint == "tags" { fm::tags_to_str(&raw_val) } else { raw_val };
                                 if hint == "type-select" {
@@ -777,6 +795,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                         }
                                     }
                                 } else if hint == "textarea" {
+                                    let key2 = key.clone();
                                     rsx! {
                                         div { class: "detail-field", key: "f-{key}",
                                             label { class: "detail-label", "{label}" }
@@ -789,7 +808,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                         let mut s = state.write();
                                                         s.editor_content = fm::update_field(
                                                             &s.editor_content,
-                                                            key,
+                                                            &key2,
                                                             &evt.value(),
                                                         );
                                                         s.editor_dirty = true;
@@ -801,6 +820,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 } else {
                                     // text, url, tags
                                     let itype = if hint == "url" { "url" } else { "text" };
+                                    let key2 = key.clone();
+                                    let hint2 = hint.clone();
                                     rsx! {
                                         div { class: "detail-field", key: "f-{key}",
                                             label { class: "detail-label", "{label}" }
@@ -812,7 +833,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                     let mut state = state;
                                                     move |evt: FormEvent| {
                                                         let raw = evt.value();
-                                                        let write_val = if hint == "tags" {
+                                                        let write_val = if hint2 == "tags" {
                                                             fm::str_to_tags(&raw)
                                                         } else {
                                                             raw
@@ -820,7 +841,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                         let mut s = state.write();
                                                         s.editor_content = fm::update_field(
                                                             &s.editor_content,
-                                                            key,
+                                                            &key2,
                                                             &write_val,
                                                         );
                                                         s.editor_dirty = true;

@@ -8,6 +8,22 @@ use std::path::PathBuf;
 
 // ─── Note types ─────────────────────────────────────────────────────────────
 
+/// A single field shown in the Detail tab for a note type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FieldDef {
+    /// Human-readable column header.
+    pub label: String,
+    /// YAML frontmatter key to read/write.
+    pub key: String,
+    /// Input hint: "text" | "url" | "textarea" | "tags" | "date"
+    #[serde(default = "default_hint")]
+    pub hint: String,
+}
+
+fn default_hint() -> String {
+    "text".into()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoteTypeConfig {
     pub name: String,
@@ -17,6 +33,9 @@ pub struct NoteTypeConfig {
     /// If empty or the file doesn't exist, the built-in blank template is used.
     #[serde(default)]
     pub template: String,
+    /// Custom Detail tab fields. If empty, the built-in defaults are used.
+    #[serde(default)]
+    pub fields: Vec<FieldDef>,
 }
 
 fn default_type_emoji() -> String {
@@ -58,21 +77,24 @@ pub fn load_types() -> Vec<NoteTypeConfig> {
 }
 
 fn default_note_types() -> Vec<NoteTypeConfig> {
+    let mk = |name: &str, emoji: &str, tmpl: &str| NoteTypeConfig {
+        name: name.into(), emoji: emoji.into(), template: tmpl.into(), fields: vec![],
+    };
     vec![
-        NoteTypeConfig { name: "note".into(),      emoji: "📝".into(),  template: "note.md".into() },
-        NoteTypeConfig { name: "task".into(),      emoji: "✅".into(),  template: "task.md".into() },
-        NoteTypeConfig { name: "meeting".into(),   emoji: "🗓".into(),  template: "meeting.md".into() },
-        NoteTypeConfig { name: "book".into(),      emoji: "📚".into(),  template: "book.md".into() },
-        NoteTypeConfig { name: "person".into(),    emoji: "👤".into(),  template: "person.md".into() },
-        NoteTypeConfig { name: "project".into(),   emoji: "🚀".into(),  template: "project.md".into() },
-        NoteTypeConfig { name: "bible".into(),     emoji: "📖".into(),  template: "bible.md".into() },
-        NoteTypeConfig { name: "sermon".into(),    emoji: "🎙️".into(), template: "sermon.md".into() },
-        NoteTypeConfig { name: "prayer".into(),    emoji: "🙏".into(),  template: "prayer.md".into() },
-        NoteTypeConfig { name: "journal".into(),   emoji: "📓".into(),  template: "journal.md".into() },
-        NoteTypeConfig { name: "recipe".into(),    emoji: "🍳".into(),  template: "recipe.md".into() },
-        NoteTypeConfig { name: "research".into(),  emoji: "🔬".into(),  template: "research.md".into() },
-        NoteTypeConfig { name: "goal".into(),      emoji: "🎯".into(),  template: "goal.md".into() },
-        NoteTypeConfig { name: "quote".into(),     emoji: "💬".into(),  template: "quote.md".into() },
+        mk("note",     "📝",  "note.md"),
+        mk("task",     "✅",  "task.md"),
+        mk("meeting",  "🗓",  "meeting.md"),
+        mk("book",     "📚",  "book.md"),
+        mk("person",   "👤",  "person.md"),
+        mk("project",  "🚀",  "project.md"),
+        mk("bible",    "📖",  "bible.md"),
+        mk("sermon",   "🎙️", "sermon.md"),
+        mk("prayer",   "🙏",  "prayer.md"),
+        mk("journal",  "📓",  "journal.md"),
+        mk("recipe",   "🍳",  "recipe.md"),
+        mk("research", "🔬",  "research.md"),
+        mk("goal",     "🎯",  "goal.md"),
+        mk("quote",    "💬",  "quote.md"),
     ]
 }
 
@@ -131,11 +153,34 @@ pub fn ensure_default_types() -> io::Result<()> {
 # Each [[type]] entry registers a note type with an emoji and template file.
 # Templates live in %APPDATA%\Glitch\templates\ and support placeholders:
 #   {{title}}, {{date}}, {{slug}}, {{type}}
+#
+# Add optional [[type.fields]] to customise the Detail tab for that type.
+# hint values: "text" | "url" | "textarea" | "tags" | "date"
+# Example:
+#   [[type.fields]]
+#   label = "Date"
+#   key = "date"
+#   hint = "text"
 
 [[type]]
 name = "meeting"
 emoji = "🗓"
 template = "meeting.md"
+
+[[type.fields]]
+label = "Date"
+key = "date"
+hint = "text"
+
+[[type.fields]]
+label = "Attendees"
+key = "attendees"
+hint = "text"
+
+[[type.fields]]
+label = "Tags"
+key = "tags"
+hint = "tags"
 
 [[type]]
 name = "book"
