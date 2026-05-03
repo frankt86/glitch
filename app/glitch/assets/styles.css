@@ -403,7 +403,7 @@ html, body, #main {
 .tree-folder:hover .folder-delete-btn { opacity: 1; }
 .folder-delete-btn:hover { color: var(--error); }
 
-.root-drop-zone {
+.root-drop-zone, .unparent-drop-zone {
     margin: 4px 8px;
     padding: 6px 12px;
     border: 1px dashed var(--border);
@@ -417,6 +417,17 @@ html, body, #main {
     border-color: var(--accent);
     color: var(--accent);
     background: var(--accent-bg);
+}
+.unparent-drop-zone {
+    border-color: var(--error);
+    color: var(--error);
+    opacity: 0.6;
+}
+.unparent-drop-zone.drag-over {
+    border-color: var(--error);
+    color: var(--error);
+    background: rgba(247, 118, 142, 0.1);
+    opacity: 1;
 }
 
 /* editor */

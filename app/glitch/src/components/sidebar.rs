@@ -23,15 +23,18 @@ pub fn Sidebar(
     on_delete_folder: EventHandler<String>,
     on_reparent: EventHandler<(String, Option<String>)>,
 ) -> Element {
-    let tree_memo = use_memo(move || {
-        state.read().vault.as_ref().map(|v| TreeFolder::build(&v.notes, default_emoji))
+    // Single memo: builds the tree and child_map together (PC-2).
+    let tree_and_map = use_memo(move || {
+        if let Some(vault) = state.read().vault.as_ref() {
+            let (tree, cm) = TreeFolder::build(&vault.notes, default_emoji);
+            (Some(tree), cm)
+        } else {
+            (None, HashMap::new())
+        }
     });
-    let tree = tree_memo.read().clone();
+    let tree = tree_and_map.read().0.clone();
     let total = state.read().vault.as_ref().map(|v| v.notes.len()).unwrap_or(0);
-
-    let child_map = use_memo(move || {
-        tree_memo.read().as_ref().map(|t| t.child_map.clone()).unwrap_or_default()
-    });
+    let child_map = use_memo(move || tree_and_map.read().1.clone());
 
     let expanded = use_signal(|| {
         let mut set = HashSet::new();
@@ -105,10 +108,11 @@ pub fn Sidebar(
     let searching = !query.is_empty();
 
     // Title matches — instant, in-memory.
+    let cm_snap = child_map.read();
     let title_results: Vec<NoteRef> = if searching {
         tree.as_ref()
             .map(|t| {
-                all_refs(t)
+                all_refs(t, &cm_snap)
                     .into_iter()
                     .filter(|n| n.title.to_lowercase().contains(&query))
                     .collect()
@@ -117,6 +121,7 @@ pub fn Sidebar(
     } else {
         vec![]
     };
+    drop(cm_snap);
 
     // IDs already shown via title match — exclude from content results.
     let title_ids: HashSet<String> = title_results.iter().map(|n| n.id.as_str().to_string()).collect();
@@ -158,7 +163,6 @@ pub fn Sidebar(
                             title: n.title.clone(),
                             icon: n.icon(default_emoji),
                             keywords: n.keywords.clone(),
-                            parent: n.frontmatter.parent.clone(),
                         })
                         .collect()
                 } else {
@@ -241,8 +245,7 @@ pub fn Sidebar(
                                                     title: n.title.clone(),
                                                     icon: n.icon(default_emoji),
                                                     keywords: n.keywords.clone(),
-                                                    parent: n.frontmatter.parent.clone(),
-                                                };
+                                                                        };
                                                 (nr, n.absolute_path.clone())
                                             })
                                             .collect()
@@ -445,7 +448,7 @@ pub fn Sidebar(
                         }
                         if dragging_note.read().is_some() {
                             div {
-                                class: if *is_unparent_drag_over.read() { "root-drop-zone drag-over" } else { "root-drop-zone" },
+                                class: if *is_unparent_drag_over.read() { "unparent-drop-zone drag-over" } else { "unparent-drop-zone" },
                                 ondragover: move |evt| evt.prevent_default(),
                                 ondragenter: move |_| is_unparent_drag_over.set(true),
                                 ondragleave: move |_| is_unparent_drag_over.set(false),
@@ -786,9 +789,9 @@ fn flatten_refs(folder: &TreeFolder) -> Vec<NoteRef> {
 
 /// All note refs including those hidden as sub-notes (child_map values).
 /// Used for search so parent/child notes are all findable.
-fn all_refs(tree: &TreeFolder) -> Vec<NoteRef> {
+fn all_refs(tree: &TreeFolder, child_map: &HashMap<String, Vec<NoteRef>>) -> Vec<NoteRef> {
     let mut out = flatten_refs(tree);
-    for children in tree.child_map.values() {
+    for children in child_map.values() {
         out.extend(children.iter().cloned());
     }
     out

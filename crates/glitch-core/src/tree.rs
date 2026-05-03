@@ -13,9 +13,6 @@ pub struct TreeFolder {
     pub folders: Vec<TreeFolder>,
     /// Notes in this folder (not in sub-folders), sorted by title.
     pub notes: Vec<NoteRef>,
-    /// Maps parent note ID → Vec of child NoteRefs (from `parent:` frontmatter).
-    /// Only populated on the root TreeFolder; empty on sub-folders.
-    pub child_map: HashMap<String, Vec<NoteRef>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,70 +21,86 @@ pub struct NoteRef {
     pub title: String,
     pub icon: String,
     pub keywords: Vec<String>,
-    /// Raw `parent:` frontmatter value, if set.
-    pub parent: Option<String>,
 }
 
 impl TreeFolder {
-    pub fn build<F>(notes: &[Note], type_emoji: F) -> Self
+    /// Build the folder tree and the parent→children map from a flat note list.
+    ///
+    /// Returns `(root_folder, child_map)` where `child_map` maps a parent note's
+    /// ID string to the NoteRefs of its sub-notes (from `parent:` frontmatter).
+    pub fn build<F>(notes: &[Note], type_emoji: F) -> (Self, HashMap<String, Vec<NoteRef>>)
     where
         F: Fn(&str) -> Option<&'static str> + Copy,
     {
-        // BTreeMap so children come out alphabetically.
         let mut root_folders: BTreeMap<String, TreeFolder> = BTreeMap::new();
         let mut root_notes: Vec<NoteRef> = Vec::new();
-
         let mut all_refs: Vec<NoteRef> = Vec::new();
 
         for note in notes {
-            let icon = note.icon(type_emoji);
             let note_ref = NoteRef {
                 id: note.id.clone(),
                 title: note.title.clone(),
-                icon,
+                icon: note.icon(type_emoji),
                 keywords: note.keywords.clone(),
-                parent: note.frontmatter.parent.clone(),
             };
-
             all_refs.push(note_ref.clone());
             let parents = note.id.parent_components();
             if parents.is_empty() {
                 root_notes.push(note_ref);
-                continue;
+            } else {
+                insert(&mut root_folders, &parents, "", note_ref);
             }
-            insert(&mut root_folders, &parents, "", note_ref);
         }
 
-        // Build child_map: resolve each note's `parent:` field to a NoteId string.
+        // Build child_map: resolve each note's `parent:` frontmatter field
+        // using priority-based matching to avoid ambiguity (PC-3).
         let mut child_map: HashMap<String, Vec<NoteRef>> = HashMap::new();
-        for note_ref in &all_refs {
-            let Some(ref raw_parent) = note_ref.parent else { continue };
+        for note in notes {
+            let Some(ref raw_parent) = note.frontmatter.parent else { continue };
             let raw_lower = raw_parent.to_lowercase();
-            // Resolve: exact ID → {parent}.md → file-stem → title (case-insensitive)
-            let parent_id = all_refs.iter().find(|n| {
-                n.id.as_str() == raw_parent.as_str()
-                    || n.id.as_str() == format!("{raw_parent}.md")
-                    || n.id.0.file_stem().map(|s| s.to_lowercase()).as_deref() == Some(&raw_lower)
-                    || n.title.to_lowercase() == raw_lower
-            });
-            if let Some(p) = parent_id {
-                child_map
-                    .entry(p.id.as_str().to_string())
-                    .or_default()
-                    .push(note_ref.clone());
+
+            // 1. Exact ID match
+            let parent_ref = all_refs.iter()
+                .find(|n| n.id.as_str() == raw_parent.as_str())
+                // 2. ID + ".md" match
+                .or_else(|| all_refs.iter().find(|n| n.id.as_str() == format!("{raw_parent}.md")))
+                // 3. File-stem match — only if unambiguous
+                .or_else(|| {
+                    let hits: Vec<_> = all_refs.iter()
+                        .filter(|n| {
+                            n.id.0.file_stem()
+                                .map(|s| s.to_lowercase())
+                                .as_deref()
+                                == Some(raw_lower.as_str())
+                        })
+                        .collect();
+                    if hits.len() == 1 { hits.into_iter().next() } else { None }
+                })
+                // 4. Title match — only if unambiguous
+                .or_else(|| {
+                    let hits: Vec<_> = all_refs.iter()
+                        .filter(|n| n.title.to_lowercase() == raw_lower)
+                        .collect();
+                    if hits.len() == 1 { hits.into_iter().next() } else { None }
+                });
+
+            if let Some(parent) = parent_ref {
+                let child_ref = all_refs.iter()
+                    .find(|n| n.id == note.id)
+                    .cloned();
+                if let Some(child) = child_ref {
+                    child_map.entry(parent.id.as_str().to_string()).or_default().push(child);
+                }
             }
         }
 
-        let mut folders: Vec<TreeFolder> = root_folders.into_values().collect();
-        folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-        // Remove notes that are already rendered as children of another note,
-        // so they don't appear twice (once in their folder, once under their parent).
+        // Remove notes already rendered as children so they don't appear twice.
         let child_ids: std::collections::HashSet<String> = child_map
             .values()
             .flat_map(|v| v.iter().map(|n| n.id.as_str().to_string()))
             .collect();
         root_notes.retain(|n| !child_ids.contains(n.id.as_str()));
+        let mut folders: Vec<TreeFolder> = root_folders.into_values().collect();
         for f in &mut folders {
             remove_children_recursive(f, &child_ids);
         }
@@ -95,15 +108,16 @@ impl TreeFolder {
         for f in &mut folders {
             sort_recursive(f);
         }
+        folders.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         root_notes.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
 
-        TreeFolder {
+        let tree = TreeFolder {
             name: String::new(),
             path: String::new(),
             folders,
             notes: root_notes,
-            child_map,
-        }
+        };
+        (tree, child_map)
     }
 
     pub fn note_count(&self) -> usize {
@@ -130,7 +144,6 @@ fn insert(
             path: path.clone(),
             folders: Vec::new(),
             notes: Vec::new(),
-            child_map: HashMap::new(),
         });
 
     if tail.is_empty() {
@@ -193,7 +206,7 @@ mod tests {
             note("projects/tolaria/intro.md"),
             note("people/alice.md"),
         ];
-        let tree = TreeFolder::build(&notes, |_| None);
+        let (tree, _cm) = TreeFolder::build(&notes, |_| None);
         assert_eq!(tree.notes.len(), 1); // README.md
         assert_eq!(tree.folders.len(), 2); // people, projects
         let projects = tree.folders.iter().find(|f| f.name == "projects").unwrap();
@@ -204,7 +217,7 @@ mod tests {
     #[test]
     fn folders_sort_alphabetically_case_insensitive() {
         let notes = vec![note("Zoo/a.md"), note("apple/b.md"), note("Banana/c.md")];
-        let tree = TreeFolder::build(&notes, |_| None);
+        let (tree, _) = TreeFolder::build(&notes, |_| None);
         let names: Vec<&str> = tree.folders.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["apple", "Banana", "Zoo"]);
     }
