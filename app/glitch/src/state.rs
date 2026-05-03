@@ -2,6 +2,7 @@ use camino::Utf8PathBuf;
 use glitch_ai::{SessionConfig, StreamEvent};
 use glitch_core::{Note, NoteId, Vault};
 use glitch_sync::SyncStatus;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Default)]
 pub struct AppState {
@@ -9,6 +10,9 @@ pub struct AppState {
     pub current_note: Option<NoteId>,
     pub editor_content: String,
     pub editor_dirty: bool,
+    /// Set to the path + timestamp whenever Glitch itself writes a vault file,
+    /// so the file watcher can skip the resulting self-triggered reload.
+    pub last_self_save: Option<(Utf8PathBuf, Instant)>,
 }
 
 impl AppState {

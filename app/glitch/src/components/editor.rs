@@ -1276,7 +1276,7 @@ fn compute_diff_lines(old: &str, new: &str) -> Vec<(char, String)> {
         .collect()
 }
 
-fn save_current(state: &mut Signal<AppState>) {
+pub(crate) fn save_current(state: &mut Signal<AppState>) {
     let snapshot = state.read();
     let Some(note) = snapshot.current_note() else { return };
     let path = note.absolute_path.clone();
@@ -1287,7 +1287,9 @@ fn save_current(state: &mut Signal<AppState>) {
         tracing::error!("failed to save {path}: {err}");
         return;
     }
-    state.write().editor_dirty = false;
+    let mut s = state.write();
+    s.editor_dirty = false;
+    s.last_self_save = Some((path.clone(), std::time::Instant::now()));
     tracing::info!("saved {path}");
 }
 

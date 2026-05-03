@@ -249,19 +249,7 @@ pub fn App() -> Element {
                     });
                 }
                 app_menu::SAVE => {
-                    let snap = app_state_m.peek();
-                    if snap.editor_dirty {
-                        if let Some(note) = snap.current_note() {
-                            let path = note.absolute_path.clone();
-                            let content = snap.editor_content.clone();
-                            drop(snap);
-                            if let Err(err) = std::fs::write(&path, content.as_bytes()) {
-                                tracing::error!("menu save failed: {err}");
-                            } else {
-                                app_state_m.write().editor_dirty = false;
-                            }
-                        }
-                    }
+                    crate::components::editor::save_current(&mut app_state_m);
                 }
                 app_menu::EXTRACT_URL => extractor_visible.set(true),
                 app_menu::SETTINGS => settings_visible.set(true),

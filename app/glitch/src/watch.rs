@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver as TokioUnbounded;
 
 const DEBOUNCE: Duration = Duration::from_millis(200);
+const SELF_SAVE_WINDOW: Duration = Duration::from_secs(2);
 
 /// `commands` is dioxus's futures-channel receiver (from `use_coroutine`).
 /// Internally we hold a tokio receiver from `glitch_core::watch_vault`, since
@@ -43,12 +44,26 @@ pub async fn watch_coroutine(
                 }
             }
             evt = next_event(&mut events) => {
-                if evt.is_none() {
-                    continue;
-                }
+                let Some(first) = evt else { continue };
                 tokio::time::sleep(DEBOUNCE).await;
+                // Collect all pending events including the first.
+                let mut changed: Vec<Utf8PathBuf> = vec![event_path(&first)];
                 if let Some(e) = events.as_mut() {
-                    while e.try_recv().is_ok() {}
+                    while let Ok(extra) = e.try_recv() {
+                        changed.push(event_path(&extra));
+                    }
+                }
+                // Skip the vault reload if every changed file was written by
+                // Glitch itself within the last SELF_SAVE_WINDOW seconds.
+                {
+                    let snap = app_state.read();
+                    if let Some((saved_path, saved_at)) = &snap.last_self_save {
+                        if saved_at.elapsed() < SELF_SAVE_WINDOW
+                            && changed.iter().all(|p| p == saved_path)
+                        {
+                            continue;
+                        }
+                    }
                 }
                 if let Some(r) = root.as_ref() {
                     let r = r.clone();
@@ -66,6 +81,13 @@ pub async fn watch_coroutine(
     // unreachable: prevents "watcher unused" warnings
     #[allow(unreachable_code)]
     drop((watcher, events, root));
+}
+
+fn event_path(evt: &VaultEvent) -> Utf8PathBuf {
+    match evt {
+        VaultEvent::Created(p) | VaultEvent::Modified(p) | VaultEvent::Removed(p) => p.clone(),
+        VaultEvent::Renamed { to, .. } => to.clone(),
+    }
 }
 
 async fn next_event(opt: &mut Option<TokioUnbounded<VaultEvent>>) -> Option<VaultEvent> {

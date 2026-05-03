@@ -590,10 +590,17 @@ fn load_note(state: &mut Signal<AppState>, id: NoteId) {
                 let path = note.absolute_path.clone();
                 let content = snap.editor_content.clone();
                 drop(snap);
-                if let Err(err) = std::fs::write(&path, content.as_bytes()) {
-                    tracing::error!("failed to flush note before switch: {err}");
+                match std::fs::write(&path, content.as_bytes()) {
+                    Ok(()) => {
+                        let mut s = state.write();
+                        s.editor_dirty = false;
+                        s.last_self_save = Some((path, std::time::Instant::now()));
+                    }
+                    Err(err) => {
+                        tracing::error!("failed to flush note before switch: {err}");
+                        state.write().editor_dirty = false;
+                    }
                 }
-                state.write().editor_dirty = false;
             }
         }
     }
