@@ -1209,6 +1209,10 @@ html, body, #main {
     cursor: pointer;
 }
 
+/* Export button */
+.editor-export-btn { color: var(--fg-muted); font-size: 12px; }
+.editor-export-btn:hover { color: var(--accent); border-color: var(--accent); }
+
 /* Delete note */
 .editor-delete-btn {
     color: var(--fg-muted);

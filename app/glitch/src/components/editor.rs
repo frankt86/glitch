@@ -7,6 +7,7 @@ use crate::state::AppState;
 use crate::vault_actions;
 use camino::Utf8PathBuf;
 use dioxus::prelude::*;
+use rfd;
 use glitch_core::{frontmatter as fm, parse_all_tables, replace_table_block, GlitchTable, NoteId};
 use glitch_embed::SimilarNote;
 use glitch_sync::CommitInfo;
@@ -625,6 +626,41 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             move |_| save_current(&mut state)
                         },
                         "Save"
+                    }
+                }
+                if has_note {
+                    button {
+                        class: "btn editor-export-btn",
+                        title: "Export as HTML",
+                        onclick: {
+                            let content = content.clone();
+                            let fm_title = fm_title.clone();
+                            move |_| {
+                                let content = content.clone();
+                                let fm_title = fm_title.clone();
+                                spawn(async move {
+                                    let html = crate::render::export_note_html(&fm_title, &content);
+                                    let stem = fm_title.trim().replace(' ', "_");
+                                    let name = if stem.is_empty() {
+                                        "export.html".to_string()
+                                    } else {
+                                        format!("{stem}.html")
+                                    };
+                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                        .set_title("Export HTML")
+                                        .set_file_name(&name)
+                                        .add_filter("HTML file", &["html"])
+                                        .save_file()
+                                        .await
+                                    {
+                                        if let Err(e) = std::fs::write(file.path(), html.as_bytes()) {
+                                            tracing::error!("HTML export failed: {e}");
+                                        }
+                                    }
+                                });
+                            }
+                        },
+                        "↓ HTML"
                     }
                 }
                 // Delete note button with inline confirmation.
