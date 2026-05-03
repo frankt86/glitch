@@ -254,6 +254,20 @@ html, body, #main {
     line-height: 1;
 }
 .sidebar-search-clear:hover { color: var(--fg); }
+.sidebar-sem-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--fg-muted);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 1px 5px;
+    line-height: 1.4;
+    flex-shrink: 0;
+}
+.sidebar-sem-btn:hover { color: var(--fg); border-color: var(--accent); }
+.sidebar-sem-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+.sem-score { color: var(--accent); font-style: normal; }
 .sidebar-search-empty { color: var(--fg-muted); font-size: 12px; padding: 12px 10px; }
 .search-section-label {
     color: var(--fg-muted);

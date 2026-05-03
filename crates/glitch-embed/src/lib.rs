@@ -154,6 +154,43 @@ pub fn is_indexed(vault_root: &Utf8Path, rel_path: &str) -> bool {
     load_store(vault_root).contains_key(rel_path)
 }
 
+/// Embed an arbitrary text query and return the `top_k` vault notes most similar to it.
+///
+/// Requires the model to be downloaded (`cache_dir`) and at least some notes to be indexed.
+/// Returns an empty `Vec` if the store has no embeddings yet.
+///
+/// **Blocking.** Run inside `tokio::task::spawn_blocking`.
+pub fn search_by_text(
+    vault_root: &Utf8Path,
+    query_text: &str,
+    top_k: usize,
+    cache_dir: &Path,
+) -> anyhow::Result<Vec<SimilarNote>> {
+    let text: String = query_text.chars().take(MAX_CHARS).collect();
+    if text.is_empty() {
+        return Ok(vec![]);
+    }
+    let query_emb = {
+        let engine = get_engine(cache_dir)?;
+        let mut batch = engine.embed(vec![text], None)?;
+        batch.pop().ok_or_else(|| anyhow!("fastembed returned empty batch"))?
+    };
+    let store = load_store(vault_root);
+    if store.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut scored: Vec<SimilarNote> = store
+        .iter()
+        .map(|(k, emb)| SimilarNote {
+            rel_path: k.clone(),
+            score: cosine(&query_emb, emb),
+        })
+        .collect();
+    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+    Ok(scored)
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {

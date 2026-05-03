@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use futures::StreamExt;
 use glitch_core::{NoteId, NoteRef, TreeFolder};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 #[derive(Clone, PartialEq)]
 enum SidebarView {
@@ -58,7 +59,10 @@ pub fn Sidebar(
     let mut is_unparent_drag_over: Signal<bool> = use_signal(|| false);
     let has_vault = state.read().vault.is_some();
     let mut sidebar_view = use_signal(|| SidebarView::Notes);
-    let mut selected_tag: Signal<Option<String>> = use_signal(|| None);
+    let selected_tag: Signal<Option<String>> = use_signal(|| None);
+    let mut semantic_mode = use_signal(|| false);
+    let mut sem_results: Signal<Vec<(String, f32)>> = use_signal(Vec::new);
+    let mut sem_loading = use_signal(|| false);
 
     // Async full-text content search results: (NoteRef, snippet).
     let mut content_results: Signal<Vec<(NoteRef, String)>> = use_signal(Vec::new);
@@ -84,6 +88,31 @@ pub fn Sidebar(
                 .await
                 .unwrap_or_default();
                 content_results.set(found);
+            }
+        },
+    );
+
+    // Coroutine: receives (vault_root, query_text), runs semantic search in a blocking thread.
+    let sem_search_tx = use_coroutine(
+        move |mut rx: UnboundedReceiver<(Utf8PathBuf, String)>| async move {
+            while let Some((vault_root, query)) = rx.next().await {
+                sem_loading.set(true);
+                sem_results.set(vec![]);
+                let result = tokio::task::spawn_blocking(move || {
+                    let cache_dir: PathBuf = std::env::var("LOCALAPPDATA")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|_| std::env::temp_dir())
+                        .join("Glitch")
+                        .join("models");
+                    glitch_embed::search_by_text(&vault_root, &query, 10, &cache_dir)
+                })
+                .await;
+                sem_loading.set(false);
+                match result {
+                    Ok(Ok(notes)) => sem_results
+                        .set(notes.into_iter().map(|n| (n.rel_path, n.score)).collect()),
+                    _ => sem_results.set(vec![]),
+                }
             }
         },
     );
@@ -131,6 +160,40 @@ pub fn Sidebar(
         .filter(|(n, _)| !title_ids.contains(n.id.as_str()))
         .cloned()
         .collect();
+
+    // Semantic results resolved to NoteRefs with scores (ordered by score desc).
+    let sem_note_refs: Vec<(NoteRef, f32)> = {
+        let sr = sem_results.read();
+        if sr.is_empty() {
+            vec![]
+        } else {
+            state
+                .read()
+                .vault
+                .as_ref()
+                .map(|v| {
+                    sr.iter()
+                        .filter_map(|(rel_path, score)| {
+                            v.notes
+                                .iter()
+                                .find(|n| n.id.as_str() == rel_path.as_str())
+                                .map(|n| {
+                                    (
+                                        NoteRef {
+                                            id: n.id.clone(),
+                                            title: n.title.clone(),
+                                            icon: n.icon(default_emoji),
+                                            keywords: n.keywords.clone(),
+                                        },
+                                        *score,
+                                    )
+                                })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    };
 
     // Collect all tags → note count, sorted alphabetically.
     let all_tags: BTreeMap<String, usize> = {
@@ -222,7 +285,7 @@ pub fn Sidebar(
                 div { class: "sidebar-search-wrap",
                     input {
                         class: "sidebar-search",
-                        placeholder: "Search notes…",
+                        placeholder: if *semantic_mode.read() { "Semantic search…" } else { "Search notes…" },
                         value: "{search_query.read()}",
                         oninput: move |evt: FormEvent| {
                             let q = evt.value();
@@ -230,8 +293,14 @@ pub fn Sidebar(
                             let trimmed = q.trim().to_ascii_lowercase();
                             if trimmed.is_empty() {
                                 content_results.set(vec![]);
+                                sem_results.set(vec![]);
+                            } else if *semantic_mode.read() {
+                                content_results.set(vec![]);
+                                if let Some(vault) = state.read().vault.as_ref() {
+                                    sem_search_tx.send((vault.root.clone(), trimmed));
+                                }
                             } else {
-                                // Send note refs + paths to the async content search.
+                                sem_results.set(vec![]);
                                 let items: Vec<(NoteRef, Utf8PathBuf)> = state
                                     .read()
                                     .vault
@@ -245,7 +314,7 @@ pub fn Sidebar(
                                                     title: n.title.clone(),
                                                     icon: n.icon(default_emoji),
                                                     keywords: n.keywords.clone(),
-                                                                        };
+                                                };
                                                 (nr, n.absolute_path.clone())
                                             })
                                             .collect()
@@ -261,9 +330,21 @@ pub fn Sidebar(
                             onclick: move |_| {
                                 search_query.set(String::new());
                                 content_results.set(vec![]);
+                                sem_results.set(vec![]);
                             },
                             "×"
                         }
+                    }
+                    button {
+                        class: if *semantic_mode.read() { "sidebar-sem-btn active" } else { "sidebar-sem-btn" },
+                        title: "Toggle semantic search",
+                        onclick: move |_| {
+                            let next = !*semantic_mode.read();
+                            semantic_mode.set(next);
+                            content_results.set(vec![]);
+                            sem_results.set(vec![]);
+                        },
+                        "≈"
                     }
                 }
             }
@@ -357,7 +438,37 @@ pub fn Sidebar(
             }
             if *sidebar_view.read() == SidebarView::Notes {
                 div { class: "tree",
-                    if searching {
+                    if searching && *semantic_mode.read() {
+                        if *sem_loading.read() {
+                            div { class: "sidebar-search-empty", "Searching…" }
+                            p { class: "related-hint", "First run downloads the embedding model (~130 MB)." }
+                        } else if sem_note_refs.is_empty() {
+                            div { class: "sidebar-search-empty", "No semantic matches" }
+                        } else {
+                            div { class: "search-section-label", "Semantic matches" }
+                            for (note, score) in sem_note_refs.iter() {
+                                {
+                                    let pct = format!("{:.0}%", score * 100.0);
+                                    rsx! {
+                                        div { class: "search-content-row",
+                                            NoteRow {
+                                                key: "{note.id.as_str()}",
+                                                note: note.clone(),
+                                                depth: 0u32,
+                                                current: current.clone(),
+                                                state,
+                                                dragging_note,
+                                                child_map,
+                                                expanded_notes,
+                                                on_reparent,
+                                            }
+                                            p { class: "search-snippet sem-score", "{pct} similar" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else if searching {
                         if title_results.is_empty() && body_results.is_empty() {
                             div { class: "sidebar-search-empty", "No notes match" }
                         }
