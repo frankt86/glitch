@@ -66,20 +66,22 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 ## Features
 
 - **WYSIWYG markdown editor** powered by TipTap v2 — headings, bold, italic, strike, code, blockquote, lists, dividers
-- **Slash commands** — type `/` anywhere in the editor or chat to get an autocomplete palette; formatting commands apply instantly, action commands (note, extract, explain, connect) go to the AI
+- **Slash commands** — type `/` anywhere in the editor or chat to get an autocomplete palette; formatting commands apply instantly, action commands (note, daily, extract, explain, connect) go to the AI
 - **Inline data tables** — `glitch-table` fenced blocks render as interactive grids with sortable columns, typed cells (text, number, date, checkbox, select, formula), and inline add/delete; gap-cursor lets you click above or below a table to place the cursor there
 - **Streaming AI chat** — Claude Code CLI runs as a subprocess in `stream-json` mode; tool-use blocks surface as expandable cards; the AI always sees which note is open; hover any Claude text response to reveal a 🔊 button that reads it aloud via the Web Speech API; click 🎤 in the chat footer to speak — your words are transcribed and placed in the chat box
 - **Safe note switching** — switching to another note while editing auto-saves the current note first; deleted notes go to the OS Recycle Bin (recoverable); Ctrl+S / File → Save saves immediately at any time
 - **Frontmatter detail tab** — structured fields per note type (article, meeting, book, person, project); editable title pinned above the editor
 - **Note types & templates** — built-in types: note, task, meeting, book, person, project, bible (SOAP method), sermon, prayer, daily journal, recipe, research, goal, quote; register custom types in `%APPDATA%\Glitch\types.toml`; `/note <title> --type meeting` materialises a template
 - **Sidebar search** — live title search above the note tree; filters across all folders in real time; clear button to restore the tree
-- **Native application menu bar** — OS-native menu bar with File (Open Vault… Ctrl+O, Extract URL…, Settings…), View (Notes Panel ✓, Claude Panel ✓, Graph… Ctrl+G), and Sync (Sync Now) submenus; sync status visible at a glance in the topbar; ⊣/⊢ icon buttons at the edges collapse each panel
+- **Native application menu bar** — OS-native menu bar with File (New Vault…, Open Vault… Ctrl+O, Save Ctrl+S, Daily Note Ctrl+D, Extract URL…, Settings…), View (Notes Panel ✓, Claude Panel ✓, Graph… Ctrl+G), and Sync (Sync Now) submenus; sync status visible at a glance in the topbar; ⊣/⊢ icon buttons at the edges collapse each panel
 - **Resizable sidebar** — drag the divider between the note list and editor to set any width from 160 px to 520 px; collapse the notes panel or the Claude panel with the ⊣/⊢ buttons in the topbar
 - **Persistent vault** — last-opened vault auto-reopens on next launch; vault path saved to `%APPDATA%\Glitch\settings.json`
 - **Auto-save** — edits are debounced and written to disk ~1.5 s after the last keystroke; the file watcher picks up the write and refreshes the graph so wikilink edges appear automatically
 - **Folder management** — create folders via the 📁 button in the sidebar; drag notes onto folders to move them; drag to the "↑ move to root" zone at the bottom of the tree to un-nest a note; hover a folder to reveal a 🗑 button that deletes the folder and moves its notes to the parent
 - **Sub-notes** — drag any note onto another note to make it a child; drag to the "✂ remove parent" zone to unparent it; or add `parent: other-note.md` directly to frontmatter; the parent note shows a ▸/▾ chevron and expands to reveal its children; cycle-safe (can't drop a parent onto its own descendant)
-- **Per-note git history** — commit list with side-by-side diff view; read-only restore to a new note
+- **Daily notes** — `File → Daily Note` (Ctrl+D) or `/daily` in chat opens (or creates) `daily/YYYY-MM-DD.md` with a simple journal template
+- **Per-note git history** — commit list with side-by-side diff view; "Restore to this version" overwrites the note in place; "Save as copy" saves to `history/<sha>.md`
+- **Empty state** — centered "Open Vault / New Vault" card shown on first launch or when no vault is loaded; new vaults are seeded with a welcome note
 - **GitHub sync** — auto-commit on inactivity, manual sync button, conflict surface
 - **Graph view** — full-screen force-directed layout of all notes; typed edges (wikilink, frontmatter related, hierarchy, shared keyword); filter chips; pan and zoom; click any node to open that note in the editor
 - **Article extractor** — paste any URL via "Extract URL…" toolbar button or `/extract <url>`; fetches readable content via `dom_smoothie` + `htmd`, saves as a note with frontmatter (`source`, `author`, `fetched`); images embedded as base64 so notes are fully self-contained
