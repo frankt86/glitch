@@ -3,6 +3,7 @@
 //! and refreshes the sidebar.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use glitch_core::frontmatter as fm;
 use jiff::Timestamp;
 use std::io;
 
@@ -23,7 +24,7 @@ pub fn create_note(vault_root: &Utf8Path, folder: &str, title: &str) -> io::Resu
     let slug = slugify(display_title);
 
     let now = Timestamp::now().strftime("%Y-%m-%d").to_string();
-    let title_yaml = yaml_scalar(display_title);
+    let title_yaml = fm::scalar(display_title);
     let body = format!(
         "---\ntitle: {title_yaml}\ncreated: {now}\ntags: []\n---\n\n# {display_title}\n\n",
     );
@@ -95,7 +96,7 @@ fn rewrite_parent_field(content: &str, parent_val: Option<&str>) -> String {
     if !content.starts_with(fm_start.as_str()) {
         // No frontmatter — prepend a minimal block if we need to set a parent.
         if let Some(val) = parent_val {
-            return format!("---{nl}parent: {}{nl}---{nl}{content}", yaml_scalar(val));
+            return format!("---{nl}parent: {}{nl}---{nl}{content}", fm::scalar(val));
         }
         return content.to_string();
     }
@@ -120,8 +121,8 @@ fn rewrite_yaml_parent(yaml: &str, parent_val: Option<&str>, nl: &str) -> String
         t == "parent:" || t.starts_with("parent: ") || t.starts_with("parent:\t")
     });
     match (parent_val, existing) {
-        (Some(val), Some(i)) => lines[i] = format!("parent: {}", yaml_scalar(val)),
-        (Some(val), None) => lines.push(format!("parent: {}", yaml_scalar(val))),
+        (Some(val), Some(i)) => lines[i] = format!("parent: {}", fm::scalar(val)),
+        (Some(val), None) => lines.push(format!("parent: {}", fm::scalar(val))),
         (None, Some(i)) => { lines.remove(i); }
         (None, None) => {}
     }
@@ -205,10 +206,6 @@ fn write_with_dedup(vault_root: &Utf8Path, slug: &str, body: &str) -> io::Result
     Ok(CreatedNote { absolute_path: path, relative_path: relative })
 }
 
-fn yaml_scalar(s: &str) -> String {
-    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
-    format!("\"{escaped}\"")
-}
 
 #[cfg(test)]
 mod tests {

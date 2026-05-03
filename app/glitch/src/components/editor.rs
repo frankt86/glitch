@@ -7,7 +7,7 @@ use crate::state::AppState;
 use crate::vault_actions;
 use camino::Utf8PathBuf;
 use dioxus::prelude::*;
-use glitch_core::{parse_all_tables, replace_table_block, GlitchTable, NoteId};
+use glitch_core::{frontmatter as fm, parse_all_tables, replace_table_block, GlitchTable, NoteId};
 use glitch_embed::SimilarNote;
 use glitch_sync::CommitInfo;
 
@@ -24,7 +24,7 @@ const TIPTAP_SRC: &str = "glitch-editor://localhost/";
 /// Strips frontmatter, then also strips any leading `# Heading` line —
 /// that heading is shown in the editor-title-h1 input instead.
 fn push_to_tiptap(content: &str) {
-    let (_, body) = split_frontmatter(content);
+    let (_, body) = fm::split_raw(content);
     let body_to_show = strip_leading_h1(&body);
     let json = serde_json::to_string(&body_to_show).unwrap_or_else(|_| "\"\"".into());
     document::eval(&format!(
@@ -53,7 +53,7 @@ fn extract_leading_h1(body: &str) -> Option<String> {
 
 /// True if the body (after frontmatter) starts with any `# Heading`.
 fn body_has_leading_h1(content: &str) -> bool {
-    let (_, body) = split_frontmatter(content);
+    let (_, body) = fm::split_raw(content);
     body.trim_start_matches('\n').starts_with("# ")
 }
 
@@ -115,129 +115,6 @@ fn make_default_table_block() -> String {
 // ---------------------------------------------------------------------------
 // Frontmatter helpers
 // ---------------------------------------------------------------------------
-
-/// Split a note into (yaml_string, body_string).
-/// Returns ("", full_content) if there is no frontmatter block.
-fn split_frontmatter(content: &str) -> (String, String) {
-    let c = content.replace("\r\n", "\n");
-    if let Some(after) = c.strip_prefix("---\n") {
-        if let Some(pos) = after.find("\n---\n") {
-            return (after[..pos].to_string(), after[pos + 5..].to_string());
-        }
-        // Handle "---" at very end of file (no trailing newline after closing ---)
-        if after.ends_with("\n---") {
-            let pos = after.len() - 4;
-            return (after[..pos].to_string(), String::new());
-        }
-    }
-    (String::new(), c)
-}
-
-fn join_frontmatter(yaml: &str, body: &str) -> String {
-    if yaml.is_empty() {
-        body.to_string()
-    } else {
-        format!("---\n{yaml}\n---\n{body}")
-    }
-}
-
-/// Read one scalar field from a YAML block.
-/// Uses split_once(':') so URLs with colons are handled correctly.
-fn get_yaml_field(yaml: &str, key: &str) -> String {
-    for line in yaml.lines() {
-        if let Some((k, v)) = line.split_once(':') {
-            if k.trim() == key {
-                let v = v.trim();
-                if let Some(inner) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-                    return inner.to_string();
-                }
-                if let Some(inner) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-                    return inner.to_string();
-                }
-                return v.to_string();
-            }
-        }
-    }
-    String::new()
-}
-
-/// Write (or add) one field in the YAML block.
-fn set_yaml_field(yaml: &str, key: &str, value: &str) -> String {
-    let formatted = format_yaml_value(key, value);
-    let mut found = false;
-    let mut lines: Vec<String> = yaml
-        .lines()
-        .map(|line| {
-            if let Some((k, _)) = line.split_once(':') {
-                if k.trim() == key {
-                    found = true;
-                    return format!("{key}: {formatted}");
-                }
-            }
-            line.to_string()
-        })
-        .collect();
-    if !found {
-        lines.push(format!("{key}: {formatted}"));
-    }
-    lines.join("\n")
-}
-
-fn format_yaml_value(key: &str, value: &str) -> String {
-    if key == "tags" || key == "keywords" {
-        return tags_str_to_yaml(value);
-    }
-    if value.is_empty() {
-        return "\"\"".to_string();
-    }
-    if value.contains(':')
-        || value.contains('#')
-        || value.starts_with('{')
-        || value.starts_with('[')
-        || value.starts_with('\'')
-    {
-        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-        return format!("\"{escaped}\"");
-    }
-    value.to_string()
-}
-
-/// "[tag1, tag2]" → "tag1, tag2";  "[]" → ""
-fn yaml_tags_to_str(raw: &str) -> String {
-    let t = raw.trim();
-    if t == "[]" || t.is_empty() {
-        return String::new();
-    }
-    t.trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// "tag1, tag2" → "[tag1, tag2]";  "" → "[]"
-fn tags_str_to_yaml(s: &str) -> String {
-    let parts: Vec<&str> = s.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
-    if parts.is_empty() {
-        "[]".into()
-    } else {
-        format!("[{}]", parts.join(", "))
-    }
-}
-
-/// Update one YAML field inside a full note (frontmatter + body).
-fn update_content_field(content: &str, key: &str, value: &str) -> String {
-    let (yaml, body) = split_frontmatter(content);
-    let new_yaml = if yaml.is_empty() {
-        // No frontmatter yet — create it with just this field.
-        format!("{key}: {}", format_yaml_value(key, value))
-    } else {
-        set_yaml_field(&yaml, key, value)
-    };
-    join_frontmatter(&new_yaml, &body)
-}
 
 // ---------------------------------------------------------------------------
 // Detail-tab field definitions per note type
@@ -429,11 +306,11 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         Some("content-changed") => {
                             if let Some(md) = val.get("content").and_then(|c| c.as_str()) {
                                 let mut s = state.write();
-                                let (yaml, _) = split_frontmatter(&s.editor_content);
+                                let (yaml, _) = fm::split_raw(&s.editor_content);
                                 // If the note originally had "# Title" as its first body
                                 // line, put it back (we stripped it on push to TipTap).
                                 let body = if *note_has_leading_h1.read() {
-                                    let title = get_yaml_field(&yaml, "title");
+                                    let title = fm::get_field(&yaml, "title");
                                     if title.is_empty() {
                                         md.to_string()
                                     } else {
@@ -442,7 +319,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 } else {
                                     md.to_string()
                                 };
-                                s.editor_content = join_frontmatter(&yaml, &body);
+                                s.editor_content = fm::join_raw(&yaml, &body);
                                 s.editor_dirty = true;
                                 drop(s);
                                 save_tx.send(());
@@ -551,17 +428,17 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     let has_tables = !tables.is_empty();
 
     // Derive frontmatter values for title H1 and Detail tab.
-    let (yaml, body) = split_frontmatter(&content);
+    let (yaml, body) = fm::split_raw(&content);
     // Use frontmatter title if set; fall back to the leading # heading in the body.
     let fm_title = {
-        let t = get_yaml_field(&yaml, "title");
+        let t = fm::get_field(&yaml, "title");
         if t.is_empty() {
             extract_leading_h1(&body).unwrap_or_default()
         } else {
             t
         }
     };
-    let note_type = get_yaml_field(&yaml, "type");
+    let note_type = fm::get_field(&yaml, "type");
 
     rsx! {
         section { class: "editor",
@@ -671,8 +548,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             move |evt: FormEvent| {
                                 let new_title = evt.value();
                                 let mut s = state.write();
-                                let (yaml, body) = split_frontmatter(&s.editor_content);
-                                let new_yaml = set_yaml_field(&yaml, "title", &new_title);
+                                let (yaml, body) = fm::split_raw(&s.editor_content);
+                                let new_yaml = fm::set_field(&yaml, "title", &new_title);
                                 // Keep the body # heading in sync if the note has one.
                                 let new_body = if *note_has_leading_h1.read() {
                                     let trimmed = body.trim_start_matches('\n');
@@ -684,7 +561,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 } else {
                                     body
                                 };
-                                s.editor_content = join_frontmatter(&new_yaml, &new_body);
+                                s.editor_content = fm::join_raw(&new_yaml, &new_body);
                                 s.editor_dirty = true;
                                 drop(s);
                                 save_tx.send(());
@@ -735,7 +612,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                     let mut state = state;
                                     move |evt: FormEvent| {
                                         let mut s = state.write();
-                                        s.editor_content = update_content_field(
+                                        s.editor_content = fm::update_field(
                                             &s.editor_content,
                                             "title",
                                             &evt.value(),
@@ -747,9 +624,9 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         }
                         for (label, key, hint) in fields_for_type(&note_type) {
                             {
-                                let raw_val = get_yaml_field(&yaml, key);
+                                let raw_val = fm::get_field(&yaml, key);
                                 let display_val =
-                                    if hint == "tags" { yaml_tags_to_str(&raw_val) } else { raw_val };
+                                    if hint == "tags" { fm::tags_to_str(&raw_val) } else { raw_val };
                                 if hint == "type-select" {
                                     let available_types = settings::load_types();
                                     let cur_type = note_type.clone();
@@ -762,7 +639,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                     let mut state = state;
                                                     move |evt: FormEvent| {
                                                         let mut s = state.write();
-                                                        s.editor_content = update_content_field(
+                                                        s.editor_content = fm::update_field(
                                                             &s.editor_content,
                                                             "type",
                                                             &evt.value(),
@@ -803,7 +680,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                     let mut state = state;
                                                     move |evt: FormEvent| {
                                                         let mut s = state.write();
-                                                        s.editor_content = update_content_field(
+                                                        s.editor_content = fm::update_field(
                                                             &s.editor_content,
                                                             key,
                                                             &evt.value(),
@@ -829,12 +706,12 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                                     move |evt: FormEvent| {
                                                         let raw = evt.value();
                                                         let write_val = if hint == "tags" {
-                                                            tags_str_to_yaml(&raw)
+                                                            fm::str_to_tags(&raw)
                                                         } else {
                                                             raw
                                                         };
                                                         let mut s = state.write();
-                                                        s.editor_content = update_content_field(
+                                                        s.editor_content = fm::update_field(
                                                             &s.editor_content,
                                                             key,
                                                             &write_val,
@@ -1446,34 +1323,5 @@ mod tests {
         assert!(lines.iter().any(|(t, l)| *t == '+' && l == "earth"));
     }
 
-    #[test]
-    fn split_frontmatter_works() {
-        let note = "---\ntitle: \"Hello\"\ntype: article\n---\n# Hello\n\nBody here.";
-        let (yaml, body) = split_frontmatter(note);
-        assert_eq!(yaml, "title: \"Hello\"\ntype: article");
-        assert_eq!(body, "# Hello\n\nBody here.");
-    }
 
-    #[test]
-    fn get_yaml_field_handles_urls() {
-        let yaml = "title: \"Test\"\nsource: https://example.com/page?q=1\ntype: article";
-        assert_eq!(get_yaml_field(yaml, "source"), "https://example.com/page?q=1");
-        assert_eq!(get_yaml_field(yaml, "title"), "Test");
-    }
-
-    #[test]
-    fn yaml_tags_roundtrip() {
-        assert_eq!(yaml_tags_to_str("[rust, dioxus]"), "rust, dioxus");
-        assert_eq!(yaml_tags_to_str("[]"), "");
-        assert_eq!(tags_str_to_yaml("rust, dioxus"), "[rust, dioxus]");
-        assert_eq!(tags_str_to_yaml(""), "[]");
-    }
-
-    #[test]
-    fn update_content_field_creates_frontmatter() {
-        let plain = "# Hello\n\nno frontmatter";
-        let result = update_content_field(plain, "title", "Hello");
-        assert!(result.starts_with("---\n"));
-        assert!(result.contains("title: Hello"));
-    }
 }

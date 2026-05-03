@@ -70,6 +70,137 @@ pub fn split(content: &str) -> (Frontmatter, &str) {
     (fm, body)
 }
 
+// ---------------------------------------------------------------------------
+// String-level YAML helpers (no serde, no schema, works on raw text)
+// ---------------------------------------------------------------------------
+
+/// Split a note into its raw YAML string and body. Returns `("", full_content)` if
+/// there is no `---` fence. CRLF is normalised to LF before splitting.
+pub fn split_raw(content: &str) -> (String, String) {
+    let c = content.replace("\r\n", "\n");
+    if let Some(after) = c.strip_prefix("---\n") {
+        if let Some(pos) = after.find("\n---\n") {
+            return (after[..pos].to_string(), after[pos + 5..].to_string());
+        }
+        if after.ends_with("\n---") {
+            let pos = after.len() - 4;
+            return (after[..pos].to_string(), String::new());
+        }
+    }
+    (String::new(), c)
+}
+
+/// Recombine a raw YAML block and body into a full note. An empty `yaml`
+/// returns `body` unchanged.
+pub fn join_raw(yaml: &str, body: &str) -> String {
+    if yaml.is_empty() {
+        body.to_string()
+    } else {
+        format!("---\n{yaml}\n---\n{body}")
+    }
+}
+
+/// Read one scalar field from a raw YAML block.
+/// Uses `split_once(':')` so URLs with colons are handled correctly.
+pub fn get_field(yaml: &str, key: &str) -> String {
+    for line in yaml.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim() == key {
+                let v = v.trim();
+                if let Some(inner) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+                    return inner.to_string();
+                }
+                if let Some(inner) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
+                    return inner.to_string();
+                }
+                return v.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// Write (or append) one field in a raw YAML block.
+pub fn set_field(yaml: &str, key: &str, value: &str) -> String {
+    let formatted = format_value(key, value);
+    let mut found = false;
+    let mut lines: Vec<String> = yaml
+        .lines()
+        .map(|line| {
+            if let Some((k, _)) = line.split_once(':') {
+                if k.trim() == key {
+                    found = true;
+                    return format!("{key}: {formatted}");
+                }
+            }
+            line.to_string()
+        })
+        .collect();
+    if !found {
+        lines.push(format!("{key}: {formatted}"));
+    }
+    lines.join("\n")
+}
+
+/// Format a value for inline YAML. Tags/keywords get list syntax; strings that
+/// need quoting are double-quoted; everything else is passed through verbatim.
+pub fn format_value(key: &str, value: &str) -> String {
+    if key == "tags" || key == "keywords" {
+        return str_to_tags(value);
+    }
+    if value.is_empty() {
+        return "\"\"".to_string();
+    }
+    if value.contains(':')
+        || value.contains('#')
+        || value.starts_with('{')
+        || value.starts_with('[')
+        || value.starts_with('\'')
+    {
+        return scalar(value);
+    }
+    value.to_string()
+}
+
+/// Always-quoted YAML scalar: `hello "world"` → `"hello \"world\""`.
+pub fn scalar(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// `"[tag1, tag2]"` → `"tag1, tag2"`;  `"[]"` → `""`
+pub fn tags_to_str(raw: &str) -> String {
+    let t = raw.trim();
+    if t == "[]" || t.is_empty() {
+        return String::new();
+    }
+    t.trim_start_matches('[')
+        .trim_end_matches(']')
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `"tag1, tag2"` → `"[tag1, tag2]"`;  `""` → `"[]"`
+pub fn str_to_tags(s: &str) -> String {
+    let parts: Vec<&str> = s.split(',').map(|t| t.trim()).filter(|t| !t.is_empty()).collect();
+    if parts.is_empty() { "[]".into() } else { format!("[{}]", parts.join(", ")) }
+}
+
+/// Update one YAML field inside a full note (frontmatter + body). Creates a
+/// minimal frontmatter block if none exists.
+pub fn update_field(content: &str, key: &str, value: &str) -> String {
+    let (yaml, body) = split_raw(content);
+    let new_yaml = if yaml.is_empty() {
+        format!("{key}: {}", format_value(key, value))
+    } else {
+        set_field(&yaml, key, value)
+    };
+    join_raw(&new_yaml, &body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +240,36 @@ mod tests {
         let doc = "---\r\ntitle: hi\r\n---\r\nbody\r\n";
         let (fm, _body) = split(doc);
         assert_eq!(fm.title.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn split_raw_basic() {
+        let note = "---\ntitle: \"Hello\"\ntype: article\n---\n# Hello\n\nBody here.";
+        let (yaml, body) = split_raw(note);
+        assert_eq!(yaml, "title: \"Hello\"\ntype: article");
+        assert_eq!(body, "# Hello\n\nBody here.");
+    }
+
+    #[test]
+    fn get_field_handles_urls() {
+        let yaml = "title: \"Test\"\nsource: https://example.com/page?q=1\ntype: article";
+        assert_eq!(get_field(yaml, "source"), "https://example.com/page?q=1");
+        assert_eq!(get_field(yaml, "title"), "Test");
+    }
+
+    #[test]
+    fn tags_roundtrip() {
+        assert_eq!(tags_to_str("[rust, dioxus]"), "rust, dioxus");
+        assert_eq!(tags_to_str("[]"), "");
+        assert_eq!(str_to_tags("rust, dioxus"), "[rust, dioxus]");
+        assert_eq!(str_to_tags(""), "[]");
+    }
+
+    #[test]
+    fn update_field_creates_frontmatter() {
+        let plain = "# Hello\n\nno frontmatter";
+        let result = update_field(plain, "title", "Hello");
+        assert!(result.starts_with("---\n"));
+        assert!(result.contains("title: Hello"));
     }
 }
