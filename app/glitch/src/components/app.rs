@@ -1,6 +1,7 @@
 use crate::chat::{chat_coroutine, check_claude_available, pick_vault_dir};
 use crate::commands::{try_parse, CommandContext, CommandOutcome};
 use crate::components::chat_panel::ChatPanel;
+use crate::components::cmd_palette::CommandPalette;
 use crate::components::editor::Editor;
 use crate::components::extractor::ExtractorDialog;
 use crate::components::graph_view::GraphView;
@@ -54,6 +55,7 @@ pub fn App() -> Element {
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
     let extractor_visible = use_signal(|| false);
+    let cmd_palette_open = use_signal(|| false);
     let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
     let mut sidebar_collapsed = use_signal(|| false);
@@ -401,6 +403,33 @@ pub fn App() -> Element {
         }
     };
 
+    // Global Ctrl+P listener — opens command palette.
+    use_effect(move || {
+        let mut open = cmd_palette_open;
+        spawn(async move {
+            let mut eval = document::eval(
+                "if (!window.__glitchCmdPalette) {\
+                   window.__glitchCmdPalette = true;\
+                   document.addEventListener('keydown', function(e) {\
+                     if ((e.ctrlKey || e.metaKey) && e.key === 'p') {\
+                       e.preventDefault();\
+                       dioxus.send('toggle');\
+                     }\
+                   });\
+                 }",
+            );
+            loop {
+                match eval.recv::<String>().await {
+                    Ok(msg) if msg == "toggle" => {
+                        let next = !*open.peek();
+                        open.set(next);
+                    }
+                    _ => break,
+                }
+            }
+        });
+    });
+
     let vault_path_label = app_state
         .read()
         .vault
@@ -605,6 +634,37 @@ pub fn App() -> Element {
             SettingsPanel { visible: settings_visible, settings: app_settings }
             GraphView { visible: graph_visible, state: app_state }
             ExtractorDialog { visible: extractor_visible, state: app_state }
+            CommandPalette {
+                state: app_state,
+                open: cmd_palette_open,
+                on_open_note: {
+                    let mut app_state = app_state;
+                    move |id: NoteId| {
+                        let snap = app_state.read();
+                        let note = snap.vault.as_ref().and_then(|v| v.notes.iter().find(|n| n.id == id).cloned());
+                        drop(snap);
+                        if let Some(note) = note {
+                            match note.read_content() {
+                                Ok(content) => {
+                                    let mut s = app_state.write();
+                                    s.current_note = Some(id);
+                                    s.editor_content = content;
+                                    s.editor_dirty = false;
+                                }
+                                Err(err) => tracing::error!("cmd palette open note: {err}"),
+                            }
+                        }
+                    }
+                },
+                on_run_command: {
+                    let mut history = chat_history;
+                    let mut app_state = app_state;
+                    let chat_tx = chat_tx.clone();
+                    move |cmd: String| {
+                        handle_send(cmd, &mut app_state, &mut history, &chat_tx);
+                    }
+                },
+            }
         }
     }
 }

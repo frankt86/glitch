@@ -1,5 +1,6 @@
 mod app;
 mod chat_panel;
+mod cmd_palette;
 mod editor;
 mod extractor;
 mod graph_view;
