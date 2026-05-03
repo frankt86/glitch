@@ -192,6 +192,7 @@ enum EditorTab {
     History,
     Tables,
     Related,
+    Backlinks,
 }
 
 #[derive(Clone, PartialEq)]
@@ -214,6 +215,15 @@ enum HistoryState {
     Error(String),
 }
 
+#[derive(Clone, PartialEq)]
+enum BacklinksState {
+    Idle,
+    Loading,
+    /// Loaded for note at `key` (vault-relative path).
+    Results { key: String, links: Vec<(String, String)> },
+    Error(String),
+}
+
 #[component]
 pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Element {
     let mut palette_index = use_signal(|| 0usize);
@@ -229,6 +239,8 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     // on push to avoid showing the title twice alongside editor-title-h1).
     let mut note_has_leading_h1 = use_signal(|| false);
     let mut related_state = use_signal(|| RelatedState::Idle);
+    let mut backlinks_state = use_signal(|| BacklinksState::Idle);
+    let mut backlinks_note: Signal<Option<String>> = use_signal(|| None);
 
     // Debounced auto-save: any dirty change triggers a 1.5s coalesced write.
     let save_tx = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
@@ -255,13 +267,17 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         .clone()
         .map(|id| id.as_str().to_string());
 
-    // Reset history and delete-confirm when note changes.
+    // Reset history, backlinks, and delete-confirm when note changes.
     {
         let note_key = current_rel.clone();
         if *hist_note.read() != note_key {
-            hist_note.set(note_key);
+            hist_note.set(note_key.clone());
             hist_state.set(HistoryState::Idle);
             delete_pending.set(false);
+        }
+        if *backlinks_note.read() != note_key {
+            backlinks_note.set(note_key);
+            backlinks_state.set(BacklinksState::Idle);
         }
     }
 
@@ -446,6 +462,63 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         }
     };
 
+    let on_backlinks_tab = {
+        let current_rel = current_rel.clone();
+        move |_| {
+            tab.set(EditorTab::Backlinks);
+            if let BacklinksState::Results { key, .. } = &*backlinks_state.read() {
+                if Some(key.as_str()) == current_rel.as_deref() {
+                    return;
+                }
+            }
+            let Some(rel) = current_rel.clone() else { return };
+            let snap = state.read();
+            let Some(vault) = snap.vault.as_ref() else { return };
+            let current_title = vault
+                .notes
+                .iter()
+                .find(|n| n.id.as_str() == rel)
+                .map(|n| n.title.to_ascii_lowercase())
+                .unwrap_or_default();
+            let current_stem = std::path::Path::new(&rel)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            let notes_to_scan: Vec<(String, String, std::path::PathBuf)> = vault
+                .notes
+                .iter()
+                .filter(|n| n.id.as_str() != rel)
+                .map(|n| (n.id.as_str().to_string(), n.title.clone(), n.absolute_path.as_std_path().to_path_buf()))
+                .collect();
+            drop(snap);
+            backlinks_state.set(BacklinksState::Loading);
+            let rel2 = rel.clone();
+            spawn(async move {
+                let result = tokio::task::spawn_blocking(move || -> Vec<(String, String)> {
+                    let stem_spaced = current_stem.replace('-', " ");
+                    let mut found = Vec::new();
+                    for (id_str, title, abs_path) in notes_to_scan {
+                        let Ok(content) = std::fs::read_to_string(&abs_path) else { continue };
+                        let lower = content.to_ascii_lowercase();
+                        let matches = lower.contains(&format!("[[{current_title}]]"))
+                            || lower.contains(&format!("[[{current_stem}]]"))
+                            || (!stem_spaced.is_empty() && lower.contains(&format!("[[{stem_spaced}]]")));
+                        if matches {
+                            found.push((id_str, title));
+                        }
+                    }
+                    found
+                })
+                .await;
+                match result {
+                    Ok(links) => backlinks_state.set(BacklinksState::Results { key: rel2, links }),
+                    Err(e) => backlinks_state.set(BacklinksState::Error(e.to_string())),
+                }
+            });
+        }
+    };
+
     let current_tab = tab.read().clone();
     let show_save = matches!(
         current_tab,
@@ -511,6 +584,13 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             class: if current_tab == EditorTab::Related { "editor-tab active" } else { "editor-tab" },
                             onclick: on_related_tab,
                             "Related"
+                        }
+                    }
+                    if has_note {
+                        button {
+                            class: if current_tab == EditorTab::Backlinks { "editor-tab active" } else { "editor-tab" },
+                            onclick: on_backlinks_tab,
+                            "Backlinks"
                         }
                     }
                 }
@@ -956,6 +1036,11 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                     app_state: state,
                     on_recalculate: move |_| run_related(),
                 }
+            } else if current_tab == EditorTab::Backlinks {
+                BacklinksPanel {
+                    backlinks_state,
+                    app_state: state,
+                }
             } else {
                 HistoryPanel {
                     hist_state,
@@ -1062,6 +1147,67 @@ fn RelatedPanel(
                                     },
                                     span { class: "related-title", "{title}" }
                                     span { class: "related-score", "{pct}%" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backlinks panel
+// ---------------------------------------------------------------------------
+
+#[component]
+fn BacklinksPanel(
+    backlinks_state: Signal<BacklinksState>,
+    app_state: Signal<AppState>,
+) -> Element {
+    match backlinks_state.read().clone() {
+        BacklinksState::Idle => rsx! {
+            div { class: "related-pane related-idle",
+                p { "Click the Backlinks tab to find notes that link here." }
+            }
+        },
+        BacklinksState::Loading => rsx! {
+            div { class: "related-pane related-loading",
+                p { "Scanning vault…" }
+            }
+        },
+        BacklinksState::Error(msg) => rsx! {
+            div { class: "related-pane related-error",
+                p { class: "related-error-msg", "Error: {msg}" }
+            }
+        },
+        BacklinksState::Results { links, .. } => rsx! {
+            div { class: "related-pane",
+                if links.is_empty() {
+                    p { class: "related-empty", "No other notes link to this one yet." }
+                } else {
+                    for (id_str, title) in links.iter() {
+                        {
+                            let id_str = id_str.clone();
+                            let title = title.clone();
+                            let mut app_state = app_state;
+                            rsx! {
+                                button {
+                                    class: "related-row",
+                                    onclick: move |_| {
+                                        let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
+                                        if let Some(root) = vault {
+                                            let abs = root.join(&id_str);
+                                            if let Ok(content) = std::fs::read_to_string(&abs) {
+                                                let mut s = app_state.write();
+                                                s.current_note = Some(glitch_core::NoteId::from_relative(id_str.clone()));
+                                                s.editor_content = content;
+                                                s.editor_dirty = false;
+                                            }
+                                        }
+                                    },
+                                    span { class: "related-title", "{title}" }
                                 }
                             }
                         }
