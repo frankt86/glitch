@@ -1,4 +1,5 @@
 mod app;
+mod bulk_ops;
 mod chat_panel;
 mod cmd_palette;
 mod editor;

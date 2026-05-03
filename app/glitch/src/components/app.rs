@@ -1,5 +1,6 @@
 use crate::chat::{chat_coroutine, check_claude_available, pick_vault_dir};
 use crate::commands::{try_parse, CommandContext, CommandOutcome};
+use crate::components::bulk_ops::BulkOpsDialog;
 use crate::components::chat_panel::ChatPanel;
 use crate::components::cmd_palette::CommandPalette;
 use crate::components::editor::Editor;
@@ -55,6 +56,7 @@ pub fn App() -> Element {
     let settings_visible = use_signal(|| false);
     let graph_visible = use_signal(|| false);
     let extractor_visible = use_signal(|| false);
+    let bulk_ops_visible = use_signal(|| false);
     let cmd_palette_open = use_signal(|| false);
     let mut sidebar_width = use_signal(|| 360.0f32);
     let mut is_resizing = use_signal(|| false);
@@ -182,6 +184,7 @@ pub fn App() -> Element {
         let mut settings_visible = settings_visible;
         let mut graph_visible = graph_visible;
         let mut extractor_visible = extractor_visible;
+        let mut bulk_ops_visible = bulk_ops_visible;
         let mut sidebar_collapsed = sidebar_collapsed;
         let mut chat_collapsed = chat_collapsed;
         let mut app_state_m = app_state;
@@ -255,6 +258,7 @@ pub fn App() -> Element {
                     crate::components::editor::save_current(&mut app_state_m);
                 }
                 app_menu::EXTRACT_URL => extractor_visible.set(true),
+                app_menu::BULK_OPS => bulk_ops_visible.set(true),
                 app_menu::SETTINGS => settings_visible.set(true),
                 app_menu::NOTES_PANEL => {
                     // muda auto-toggles the check mark; mirror it in the signal
@@ -643,6 +647,7 @@ pub fn App() -> Element {
             SettingsPanel { visible: settings_visible, settings: app_settings }
             GraphView { visible: graph_visible, state: app_state }
             ExtractorDialog { visible: extractor_visible, state: app_state }
+            BulkOpsDialog { visible: bulk_ops_visible, state: app_state, settings: app_settings }
             CommandPalette {
                 state: app_state,
                 open: cmd_palette_open,

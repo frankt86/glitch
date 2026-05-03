@@ -13,6 +13,7 @@ pub const NOTES_PANEL: &str = "view.notes_panel";
 pub const CLAUDE_PANEL: &str = "view.claude_panel";
 pub const GRAPH: &str = "view.graph";
 pub const SYNC_NOW: &str = "sync.now";
+pub const BULK_OPS: &str = "file.bulk_ops";
 
 thread_local! {
     static NOTES_CHECK: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
@@ -54,6 +55,7 @@ pub fn build_app_menu() -> Menu {
         Some("Ctrl+S".parse::<Accelerator>().expect("accel")),
     );
     let extract_url = MenuItem::with_id(MenuId::from(EXTRACT_URL), "Extract URL…", true, None);
+    let bulk_ops = MenuItem::with_id(MenuId::from(BULK_OPS), "Bulk AI Ops…", true, None);
     let daily_note = MenuItem::with_id(
         MenuId::from(DAILY_NOTE),
         "Daily Note",
@@ -69,6 +71,7 @@ pub fn build_app_menu() -> Menu {
         &PredefinedMenuItem::separator(),
         &daily_note,
         &extract_url,
+        &bulk_ops,
         &PredefinedMenuItem::separator(),
         &settings,
     ])
