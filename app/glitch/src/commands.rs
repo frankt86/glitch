@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 pub enum SlashCommand {
     Help,
     NewNote { title: String, note_type: Option<String> },
+    Daily,
     Explain,
     Extract { url: String },
     Connect,
@@ -38,6 +39,8 @@ pub enum CommandOutcome {
         note_type: String,
         vault_root: camino::Utf8PathBuf,
     },
+    /// Open (or create) today's daily journal note.
+    DailyNote,
 }
 
 impl SlashCommand {
@@ -65,6 +68,7 @@ impl SlashCommand {
                     }
                 }
             }
+            "daily" | "today" => Ok(SlashCommand::Daily),
             "explain" | "e" => Ok(SlashCommand::Explain),
             "extract" | "fetch" => {
                 if args.is_empty() {
@@ -86,6 +90,7 @@ impl SlashCommand {
         match self {
             SlashCommand::Help => "help",
             SlashCommand::NewNote { .. } => "note",
+            SlashCommand::Daily => "daily",
             SlashCommand::Explain => "explain",
             SlashCommand::Extract { .. } => "extract",
             SlashCommand::Connect => "connect",
@@ -110,6 +115,12 @@ impl SlashCommand {
                     // No type specified: let Claude create the note with its own content.
                     CommandOutcome::Prompt(new_note_prompt(root, &title))
                 }
+            }
+            SlashCommand::Daily => {
+                if ctx.vault_root.is_none() {
+                    return CommandOutcome::Error("open a vault first".into());
+                }
+                CommandOutcome::DailyNote
             }
             SlashCommand::Explain => match (&ctx.current_note_relative, &ctx.current_note_content) {
                 (Some(path), Some(body)) => CommandOutcome::Prompt(explain_prompt(path, body)),
@@ -166,6 +177,7 @@ const HELP_TEXT: &str = "Slash commands:
   /note <title>               ask Claude to create a new note in the vault root
   /note <title> --type <type> create a note from a local template (no AI)
                               types: meeting, book, person, project (or custom)
+  /daily                      open (or create) today's daily note  Ctrl+D
   /extract <url>              fetch an article and save it as a note (no AI)
   /explain                    summarise the currently open note
   /connect                    find related notes for the current note

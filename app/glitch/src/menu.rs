@@ -7,6 +7,7 @@ pub const OPEN_VAULT: &str = "file.open_vault";
 pub const NEW_VAULT: &str = "file.new_vault";
 pub const SAVE: &str = "file.save";
 pub const EXTRACT_URL: &str = "file.extract_url";
+pub const DAILY_NOTE: &str = "file.daily_note";
 pub const SETTINGS: &str = "file.settings";
 pub const NOTES_PANEL: &str = "view.notes_panel";
 pub const CLAUDE_PANEL: &str = "view.claude_panel";
@@ -53,6 +54,12 @@ pub fn build_app_menu() -> Menu {
         Some("Ctrl+S".parse::<Accelerator>().expect("accel")),
     );
     let extract_url = MenuItem::with_id(MenuId::from(EXTRACT_URL), "Extract URL…", true, None);
+    let daily_note = MenuItem::with_id(
+        MenuId::from(DAILY_NOTE),
+        "Daily Note",
+        true,
+        Some("Ctrl+D".parse::<Accelerator>().expect("accel")),
+    );
     let settings = MenuItem::with_id(MenuId::from(SETTINGS), "Settings…", true, None);
     file.append_items(&[
         &open_vault,
@@ -60,6 +67,7 @@ pub fn build_app_menu() -> Menu {
         &PredefinedMenuItem::separator(),
         &save,
         &PredefinedMenuItem::separator(),
+        &daily_note,
         &extract_url,
         &PredefinedMenuItem::separator(),
         &settings,

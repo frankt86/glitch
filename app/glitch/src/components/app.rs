@@ -22,6 +22,7 @@ use dioxus::desktop::use_muda_event_handler;
 use dioxus::prelude::*;
 use glitch_ai::SessionConfig;
 use glitch_core::{NoteId, Vault};
+use jiff::Timestamp;
 use glitch_mcp::pipe::ApprovalDecision;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -261,6 +262,9 @@ pub fn App() -> Element {
                 app_menu::CLAUDE_PANEL => {
                     let c = !*chat_collapsed.peek();
                     chat_collapsed.set(c);
+                }
+                app_menu::DAILY_NOTE => {
+                    open_or_create_daily(&mut app_state_m);
                 }
                 app_menu::GRAPH => graph_visible.set(true),
                 app_menu::SYNC_NOW => {
@@ -700,6 +704,13 @@ fn handle_send(
                         }
                     }
                 }
+                CommandOutcome::DailyNote => {
+                    open_or_create_daily(app_state);
+                    history.write().push(ChatEntry::LocalReply {
+                        command: display,
+                        body: format!("opened daily/{}", Timestamp::now().strftime("%Y-%m-%d")),
+                    });
+                }
             }
         }
         Some(Err(err)) => {
@@ -713,6 +724,46 @@ fn handle_send(
                 None => text,
             };
             chat_tx.send(ChatCommand::Send(enriched));
+        }
+    }
+}
+
+/// Open today's daily note, creating it (in `daily/YYYY-MM-DD.md`) if it does
+/// not exist yet. No-op when no vault is loaded.
+fn open_or_create_daily(app_state: &mut Signal<AppState>) {
+    let vault_root = match app_state.read().vault.as_ref().map(|v| v.root.clone()) {
+        Some(r) => r,
+        None => return,
+    };
+    let date = Timestamp::now().strftime("%Y-%m-%d").to_string();
+    let rel_path = format!("daily/{date}.md");
+    let abs_path = vault_root.join(&rel_path);
+
+    if abs_path.exists() {
+        match std::fs::read_to_string(abs_path.as_std_path()) {
+            Ok(content) => {
+                let mut s = app_state.write();
+                s.current_note = Some(NoteId::from_relative(rel_path));
+                s.editor_content = content;
+                s.editor_dirty = false;
+            }
+            Err(err) => tracing::error!("failed to read daily note: {err}"),
+        }
+    } else {
+        let body = format!(
+            "---\ntitle: \"{date}\"\ncreated: {date}\ntags: []\ntype: daily\n---\n\n\
+            # {date}\n\n## Today\n\n\n\n## Notes\n\n\n\n## Grateful for\n\n"
+        );
+        match vault_actions::create_note_from_template(&vault_root, "daily", &date, &body) {
+            Ok(created) => {
+                let content =
+                    std::fs::read_to_string(created.absolute_path.as_std_path()).unwrap_or(body);
+                let mut s = app_state.write();
+                s.current_note = Some(NoteId(created.relative_path));
+                s.editor_content = content;
+                s.editor_dirty = false;
+            }
+            Err(err) => tracing::error!("failed to create daily note: {err}"),
         }
     }
 }

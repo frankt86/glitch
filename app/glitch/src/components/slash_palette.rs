@@ -37,11 +37,12 @@ pub const COMMANDS: &[CommandHint] = &[
     // ── Data ──────────────────────────────────────────────────────────────────
     CommandHint { name: "table",    args: "", description: "Insert an interactive data table", insertion: "/table", tiptap_cmd: None },
     // ── Actions ───────────────────────────────────────────────────────────────
-    CommandHint { name: "note",     args: "<title>", description: "Create a new note",         insertion: "/note ",    tiptap_cmd: None },
-    CommandHint { name: "extract",  args: "<url>",   description: "Fetch an article as a note",insertion: "/extract ", tiptap_cmd: None },
-    CommandHint { name: "explain",  args: "",         description: "Summarise the current note",insertion: "/explain",  tiptap_cmd: None },
-    CommandHint { name: "connect",  args: "",         description: "Find related notes",        insertion: "/connect",  tiptap_cmd: None },
-    CommandHint { name: "help",     args: "",         description: "Show available commands",   insertion: "/help",     tiptap_cmd: None },
+    CommandHint { name: "note",     args: "<title>", description: "Create a new note",           insertion: "/note ",    tiptap_cmd: None },
+    CommandHint { name: "daily",   args: "",         description: "Open today's daily note",     insertion: "/daily",   tiptap_cmd: None },
+    CommandHint { name: "extract",  args: "<url>",   description: "Fetch an article as a note",  insertion: "/extract ", tiptap_cmd: None },
+    CommandHint { name: "explain",  args: "",         description: "Summarise the current note",  insertion: "/explain",  tiptap_cmd: None },
+    CommandHint { name: "connect",  args: "",         description: "Find related notes",          insertion: "/connect",  tiptap_cmd: None },
+    CommandHint { name: "help",     args: "",         description: "Show available commands",     insertion: "/help",     tiptap_cmd: None },
 ];
 
 /// Return the TipTap format command string for a given insertion token, if any.
