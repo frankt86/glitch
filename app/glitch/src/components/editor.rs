@@ -1181,6 +1181,7 @@ fn DiffView(
         }
     };
 
+    // "Save as copy" — creates history/<sha>.md and opens it.
     let on_restore = {
         let historical = historical.clone();
         let commit = commit.clone();
@@ -1204,6 +1205,31 @@ fn DiffView(
         }
     };
 
+    // "Restore in place" — overwrites the current note file with this version.
+    let on_restore_inplace = {
+        let historical = historical.clone();
+        let mut app_state_rw = app_state;
+        move |_| {
+            let snap = app_state_rw.read();
+            let Some(note) = snap.current_note() else { return };
+            let path = note.absolute_path.clone();
+            drop(snap);
+            let hist_content = historical.clone();
+            match std::fs::write(&path, hist_content.as_bytes()) {
+                Ok(()) => {
+                    let mut s = app_state_rw.write();
+                    s.editor_content = hist_content.clone();
+                    s.editor_dirty = false;
+                    s.last_self_save = Some((path, std::time::Instant::now()));
+                    drop(s);
+                    tab.set(EditorTab::Edit);
+                    push_to_tiptap(&hist_content);
+                }
+                Err(e) => tracing::error!("restore in place failed: {e}"),
+            }
+        }
+    };
+
     rsx! {
         div { class: "history-panel diff-panel",
             div { class: "diff-toolbar",
@@ -1216,6 +1242,9 @@ fn DiffView(
                     span { class: "diff-stat-add", "+{stats.added}" }
                     " / "
                     span { class: "diff-stat-del", "-{stats.removed}" }
+                }
+                button { class: "btn btn-danger", onclick: on_restore_inplace,
+                    "Restore to this version"
                 }
                 button { class: "btn", onclick: on_restore,
                     "Save as history/{commit.sha}.md"
