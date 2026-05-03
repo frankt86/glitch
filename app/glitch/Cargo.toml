@@ -32,6 +32,7 @@ tracing-subscriber.workspace = true
 camino.workspace = true
 rfd.workspace = true
 dirs-next.workspace = true
+trash.workspace = true
 pulldown-cmark.workspace = true
 notify.workspace = true
 reqwest.workspace = true

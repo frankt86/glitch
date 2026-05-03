@@ -66,6 +66,9 @@ rfd = "0.15"
 # Platform dirs
 dirs-next = "2"
 
+# File system
+trash = "5"
+
 # Internal crates
 glitch-core = { path = "crates/glitch-core" }
 glitch-ai = { path = "crates/glitch-ai" }

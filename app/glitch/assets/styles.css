@@ -33,6 +33,34 @@ html, body, #main {
     height: 100vh;
 }
 
+.sync-error-banner {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: #4a1020;
+    border-top: 1px solid var(--error);
+    color: var(--fg);
+    font-size: 13px;
+}
+.sync-error-text { flex: 1; font-family: var(--font-mono); font-size: 12px; }
+.sync-error-dismiss {
+    background: none;
+    border: 1px solid var(--error);
+    color: var(--error);
+    border-radius: 3px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+}
+.sync-error-dismiss:hover { background: var(--error); color: var(--bg); }
+
 .topbar {
     display: flex;
     align-items: center;
@@ -976,6 +1004,7 @@ html, body, #main {
 
 /* ── Related panel ── */
 .related-pane { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.related-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .related-idle, .related-loading, .related-error { color: var(--fg-muted); padding: 32px 24px; }
 .related-hint { font-size: 12px; color: var(--fg-muted); margin-top: 4px; }
 .related-error-msg { color: var(--error); }

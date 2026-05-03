@@ -423,6 +423,9 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
             loop {
                 match eval.recv::<serde_json::Value>().await {
                     Ok(val) => match val.get("type").and_then(|t| t.as_str()) {
+                        Some("ctrl-s") => {
+                            save_current(&mut state);
+                        }
                         Some("content-changed") => {
                             if let Some(md) = val.get("content").and_then(|c| c.as_str()) {
                                 let mut s = state.write();
@@ -493,18 +496,12 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         }
     };
 
-    let on_related_tab = {
+    // Shared embed trigger — called by both the tab click and the Recalculate button.
+    let mut run_related = {
         let vault_root = vault_root.clone();
         let current_rel = current_rel.clone();
         let content = content.clone();
-        move |_| {
-            tab.set(EditorTab::Related);
-            // Don't re-compute if we already have results for this exact note.
-            if let RelatedState::Results { key, .. } = &*related_state.read() {
-                if Some(key.as_str()) == current_rel.as_deref() {
-                    return;
-                }
-            }
+        move || {
             let (Some(root), Some(rel)) = (&vault_root, &current_rel) else { return };
             let root = root.clone();
             let rel = rel.clone();
@@ -527,6 +524,21 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                     Err(e) => related_state.set(RelatedState::Error(e.to_string())),
                 }
             });
+        }
+    };
+
+    let on_related_tab = {
+        let mut run_related = run_related.clone();
+        let current_rel = current_rel.clone();
+        move |_| {
+            tab.set(EditorTab::Related);
+            // Don't re-compute if we already have results for this exact note.
+            if let RelatedState::Results { key, .. } = &*related_state.read() {
+                if Some(key.as_str()) == current_rel.as_deref() {
+                    return;
+                }
+            }
+            run_related();
         }
     };
 
@@ -901,6 +913,12 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 let mut state = state;
                                 let on_command = on_command;
                                 move |evt: KeyboardEvent| {
+                                    // Ctrl+S saves the note.
+                                    if evt.modifiers().ctrl() && evt.key() == Key::Character("s".to_string()) {
+                                        evt.prevent_default();
+                                        save_current(&mut state);
+                                        return;
+                                    }
                                     let body = state.read().editor_content.clone();
                                     let q = editor_slash_query(&body);
                                     let palette_open = q.is_some();
@@ -1029,7 +1047,11 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                     }
                 }
             } else if current_tab == EditorTab::Related {
-                RelatedPanel { related_state, app_state: state }
+                RelatedPanel {
+                    related_state,
+                    app_state: state,
+                    on_recalculate: move |_| run_related(),
+                }
             } else {
                 HistoryPanel {
                     hist_state,
@@ -1053,15 +1075,15 @@ fn delete_current(state: &mut Signal<AppState>) {
     let Some(note) = snapshot.current_note() else { return };
     let path = note.absolute_path.clone();
     drop(snapshot);
-    if let Err(err) = std::fs::remove_file(&path) {
-        tracing::error!("failed to delete {path}: {err}");
+    if let Err(err) = trash::delete(&path) {
+        tracing::error!("failed to trash {path}: {err}");
         return;
     }
     let mut s = state.write();
     s.current_note = None;
     s.editor_content.clear();
     s.editor_dirty = false;
-    tracing::info!("deleted {path}");
+    tracing::info!("trashed {path}");
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,6 +1094,7 @@ fn delete_current(state: &mut Signal<AppState>) {
 fn RelatedPanel(
     related_state: Signal<RelatedState>,
     app_state: Signal<AppState>,
+    on_recalculate: EventHandler<()>,
 ) -> Element {
     match related_state.read().clone() {
         RelatedState::Idle => rsx! {
@@ -1088,10 +1111,22 @@ fn RelatedPanel(
         RelatedState::Error(msg) => rsx! {
             div { class: "related-pane related-error",
                 p { class: "related-error-msg", "Error: {msg}" }
+                button {
+                    class: "btn",
+                    onclick: move |_| on_recalculate.call(()),
+                    "↺ Retry"
+                }
             }
         },
         RelatedState::Results { notes, .. } => rsx! {
             div { class: "related-pane",
+                div { class: "related-toolbar",
+                    button {
+                        class: "btn",
+                        onclick: move |_| on_recalculate.call(()),
+                        "↺ Recalculate"
+                    }
+                }
                 if notes.is_empty() {
                     p { class: "related-empty", "No similar notes found yet. Add more notes to the vault to see suggestions." }
                 } else {

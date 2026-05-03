@@ -4,6 +4,7 @@ use dioxus::desktop::muda::{
 use std::cell::RefCell;
 
 pub const OPEN_VAULT: &str = "file.open_vault";
+pub const SAVE: &str = "file.save";
 pub const EXTRACT_URL: &str = "file.extract_url";
 pub const SETTINGS: &str = "file.settings";
 pub const NOTES_PANEL: &str = "view.notes_panel";
@@ -43,10 +44,18 @@ pub fn build_app_menu() -> Menu {
         true,
         Some("Ctrl+O".parse::<Accelerator>().expect("accel")),
     );
+    let save = MenuItem::with_id(
+        MenuId::from(SAVE),
+        "Save",
+        true,
+        Some("Ctrl+S".parse::<Accelerator>().expect("accel")),
+    );
     let extract_url = MenuItem::with_id(MenuId::from(EXTRACT_URL), "Extract URL…", true, None);
     let settings = MenuItem::with_id(MenuId::from(SETTINGS), "Settings…", true, None);
     file.append_items(&[
         &open_vault,
+        &PredefinedMenuItem::separator(),
+        &save,
         &PredefinedMenuItem::separator(),
         &extract_url,
         &PredefinedMenuItem::separator(),

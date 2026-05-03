@@ -57,6 +57,7 @@ pub fn App() -> Element {
     let mut is_resizing = use_signal(|| false);
     let mut sidebar_collapsed = use_signal(|| false);
     let mut chat_collapsed = use_signal(|| false);
+    let mut sync_error_dismissed = use_signal(|| false);
 
     // Ensure agent instructions + note type templates exist on first run.
     use_future({
@@ -180,6 +181,7 @@ pub fn App() -> Element {
         let mut extractor_visible = extractor_visible;
         let mut sidebar_collapsed = sidebar_collapsed;
         let mut chat_collapsed = chat_collapsed;
+        let mut app_state_m = app_state;
         let sync_tx_m = sync_tx.clone();
         let chat_tx_m = chat_tx.clone();
         let watch_tx_m = watch_tx.clone();
@@ -190,7 +192,7 @@ pub fn App() -> Element {
                     let chat_tx = chat_tx_m.clone();
                     let sync_tx = sync_tx_m.clone();
                     let watch_tx = watch_tx_m.clone();
-                    let mut app_state = app_state;
+                    let mut app_state = app_state_m;
                     let runtime_sig = runtime_sig_m;
                     spawn(async move {
                         let Some(root) = pick_vault_dir().await else { return };
@@ -214,6 +216,21 @@ pub fn App() -> Element {
                         }
                     });
                 }
+                app_menu::SAVE => {
+                    let snap = app_state_m.peek();
+                    if snap.editor_dirty {
+                        if let Some(note) = snap.current_note() {
+                            let path = note.absolute_path.clone();
+                            let content = snap.editor_content.clone();
+                            drop(snap);
+                            if let Err(err) = std::fs::write(&path, content.as_bytes()) {
+                                tracing::error!("menu save failed: {err}");
+                            } else {
+                                app_state_m.write().editor_dirty = false;
+                            }
+                        }
+                    }
+                }
                 app_menu::EXTRACT_URL => extractor_visible.set(true),
                 app_menu::SETTINGS => settings_visible.set(true),
                 app_menu::NOTES_PANEL => {
@@ -227,7 +244,7 @@ pub fn App() -> Element {
                 }
                 app_menu::GRAPH => graph_visible.set(true),
                 app_menu::SYNC_NOW => {
-                    if let Some(root) = app_state.peek().vault.as_ref().map(|v| v.root.clone()) {
+                    if let Some(root) = app_state_m.peek().vault.as_ref().map(|v| v.root.clone()) {
                         sync_tx_m.send((root, SyncCommand::Sync));
                     }
                 }
@@ -416,6 +433,32 @@ pub fn App() -> Element {
                     if *chat_collapsed.read() { "⊣" } else { "⊢" }
                 }
             }
+            // Sync error banner — shows full error text, dismissible.
+            {
+                let ss = sync_state.read();
+                if let SyncState::Error(ref msg) = *ss {
+                    if !*sync_error_dismissed.read() {
+                        let msg = msg.clone();
+                        rsx! {
+                            div { class: "sync-error-banner",
+                                span { class: "sync-error-text", "Sync error: {msg}" }
+                                button {
+                                    class: "sync-error-dismiss",
+                                    onclick: move |_| sync_error_dismissed.set(true),
+                                    "×"
+                                }
+                            }
+                        }
+                    } else { rsx! {} }
+                } else {
+                    // Reset dismiss when error clears so the next error is visible.
+                    if *sync_error_dismissed.read() {
+                        sync_error_dismissed.set(false);
+                    }
+                    rsx! {}
+                }
+            }
+
             main {
                 class: "workspace",
                 style: "grid-template-columns: {sidebar_w}px {resize_w}px 1fr {chat_w}px",

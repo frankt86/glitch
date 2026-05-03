@@ -634,6 +634,14 @@
 
     window.__glitchEditor = editor;
     window.parent.postMessage({ type: 'tiptap-ready' }, '*');
+
+    // Forward Ctrl+S / Cmd+S to the parent Dioxus window as a save request.
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        window.parent.postMessage({ type: 'ctrl-s' }, '*');
+      }
+    });
   </script>
 </body>
 </html>

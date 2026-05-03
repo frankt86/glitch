@@ -159,7 +159,14 @@ pub fn ChatPanel(
                                 "#;
                                 let mut eval = document::eval(script);
                                 if let Ok(t) = eval.recv::<String>().await {
-                                    if !t.is_empty() { draft.set(t); } // errors start with [MIC ERROR]
+                                    if !t.starts_with("[MIC ERROR]") && !t.is_empty() {
+                                        let existing = draft.peek().clone();
+                                        if existing.is_empty() {
+                                            draft.set(t);
+                                        } else {
+                                            draft.set(format!("{} {}", existing.trim_end(), t));
+                                        }
+                                    }
                                 }
                                 is_listening.set(false);
                             });

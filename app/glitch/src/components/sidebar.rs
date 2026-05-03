@@ -69,7 +69,7 @@ pub fn Sidebar(
     let search_results: Vec<NoteRef> = if searching {
         tree.as_ref()
             .map(|t| {
-                flatten_refs(t)
+                all_refs(t)
                     .into_iter()
                     .filter(|n| n.title.to_lowercase().contains(&query))
                     .collect()
@@ -571,7 +571,33 @@ fn flatten_refs(folder: &TreeFolder) -> Vec<NoteRef> {
     out
 }
 
+/// All note refs including those hidden as sub-notes (child_map values).
+/// Used for search so parent/child notes are all findable.
+fn all_refs(tree: &TreeFolder) -> Vec<NoteRef> {
+    let mut out = flatten_refs(tree);
+    for children in tree.child_map.values() {
+        out.extend(children.iter().cloned());
+    }
+    out
+}
+
 fn load_note(state: &mut Signal<AppState>, id: NoteId) {
+    // Flush any unsaved edits before switching away.
+    {
+        let snap = state.read();
+        if snap.editor_dirty {
+            if let Some(note) = snap.current_note() {
+                let path = note.absolute_path.clone();
+                let content = snap.editor_content.clone();
+                drop(snap);
+                if let Err(err) = std::fs::write(&path, content.as_bytes()) {
+                    tracing::error!("failed to flush note before switch: {err}");
+                }
+                state.write().editor_dirty = false;
+            }
+        }
+    }
+
     let Some(vault) = state.read().vault.clone() else { return };
     let Some(note) = vault.notes.iter().find(|n| n.id == id) else { return };
     let content = match note.read_content() {
