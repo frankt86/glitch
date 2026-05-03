@@ -46,6 +46,28 @@ pub fn create_note_from_template(
     write_with_dedup(&dir, &slug, body)
 }
 
+/// Initialise a new vault at `root` (creates the directory if needed) and
+/// seed it with a welcome note if the directory is empty of `.md` files.
+pub fn create_vault(root: &Utf8Path) -> io::Result<()> {
+    std::fs::create_dir_all(root)?;
+    let has_notes = std::fs::read_dir(root)?
+        .flatten()
+        .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("md"));
+    if !has_notes {
+        let now = Timestamp::now().strftime("%Y-%m-%d").to_string();
+        let body = format!(
+            "---\ntitle: \"Welcome to Glitch\"\ncreated: {now}\ntags: []\n---\n\n\
+            # Welcome to Glitch\n\n\
+            This is your vault — a folder of plain Markdown files.\n\n\
+            - Type `/` anywhere in the editor for commands\n\
+            - Ask Claude anything in the chat panel\n\
+            - Link notes with `[[note-title]]`\n"
+        );
+        std::fs::write(root.join("welcome.md").as_std_path(), body)?;
+    }
+    Ok(())
+}
+
 /// Create a folder (and any missing parents) inside the vault.
 pub fn create_folder(vault_root: &Utf8Path, rel_path: &str) -> io::Result<()> {
     let rel = rel_path.trim().trim_matches(['/', '\\']);

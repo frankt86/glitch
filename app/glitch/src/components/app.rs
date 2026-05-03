@@ -216,6 +216,38 @@ pub fn App() -> Element {
                         }
                     });
                 }
+                app_menu::NEW_VAULT => {
+                    let chat_tx = chat_tx_m.clone();
+                    let sync_tx = sync_tx_m.clone();
+                    let watch_tx = watch_tx_m.clone();
+                    let mut app_state = app_state_m;
+                    let runtime_sig = runtime_sig_m;
+                    spawn(async move {
+                        let Some(root) = pick_vault_dir().await else { return };
+                        if let Err(err) = vault_actions::create_vault(&root) {
+                            tracing::error!("failed to create vault: {err}");
+                            return;
+                        }
+                        match Vault::load(&root) {
+                            Ok(vault) => {
+                                let root_path = vault.root.clone();
+                                settings::save_last_vault(root_path.as_str());
+                                app_state.write().vault = Some(vault);
+                                app_state.write().current_note = None;
+                                app_state.write().editor_content.clear();
+                                app_state.write().editor_dirty = false;
+                                let config = build_session_config(&runtime_sig, app_settings);
+                                chat_tx.send(ChatCommand::StartSession {
+                                    root: root_path.clone(),
+                                    config,
+                                });
+                                sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
+                                watch_tx.send(root_path);
+                            }
+                            Err(err) => tracing::error!("failed to create vault: {err}"),
+                        }
+                    });
+                }
                 app_menu::SAVE => {
                     let snap = app_state_m.peek();
                     if snap.editor_dirty {
@@ -459,48 +491,122 @@ pub fn App() -> Element {
                 }
             }
 
-            main {
-                class: "workspace",
-                style: "grid-template-columns: {sidebar_w}px {resize_w}px 1fr {chat_w}px",
-                Sidebar {
-                    state: app_state,
-                    on_create_note: create_new_note,
-                    on_create_folder,
-                    on_move_note,
-                    on_delete_folder,
-                    on_reparent,
-                }
-                div {
-                    class: "sidebar-resize-handle",
-                    onmousedown: move |evt| {
-                        evt.prevent_default();
-                        is_resizing.set(true);
-                    },
-                }
-                Editor {
-                    state: app_state,
-                    on_command: {
-                        let mut history = chat_history;
-                        let mut app_state = app_state;
-                        let chat_tx = chat_tx.clone();
-                        move |text: String| {
-                            handle_send(text, &mut app_state, &mut history, &chat_tx);
+            if app_state.read().vault.is_none() {
+                div { class: "empty-state",
+                    div { class: "empty-state-card",
+                        h1 { class: "empty-state-title", "Glitch" }
+                        p { class: "empty-state-sub", "AI-native knowledge base" }
+                        div { class: "empty-state-actions",
+                            button {
+                                class: "btn btn-primary empty-state-btn",
+                                onclick: move |_| {
+                                    let mut app_state = app_state;
+                                    let chat_tx = chat_tx.clone();
+                                    let sync_tx = sync_tx.clone();
+                                    let watch_tx = watch_tx.clone();
+                                    let runtime_sig = permission_runtime;
+                                    spawn(async move {
+                                        let Some(root) = pick_vault_dir().await else { return };
+                                        match Vault::load(&root) {
+                                            Ok(vault) => {
+                                                let root_path = vault.root.clone();
+                                                settings::save_last_vault(root_path.as_str());
+                                                app_state.write().vault = Some(vault);
+                                                app_state.write().current_note = None;
+                                                app_state.write().editor_content.clear();
+                                                app_state.write().editor_dirty = false;
+                                                let config = build_session_config(&runtime_sig, app_settings);
+                                                chat_tx.send(ChatCommand::StartSession { root: root_path.clone(), config });
+                                                sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
+                                                watch_tx.send(root_path);
+                                            }
+                                            Err(err) => tracing::error!("failed to load vault: {err}"),
+                                        }
+                                    });
+                                },
+                                "Open Vault"
+                                kbd { class: "empty-state-kbd", "Ctrl+O" }
+                            }
+                            button {
+                                class: "btn empty-state-btn",
+                                onclick: move |_| {
+                                    let mut app_state = app_state;
+                                    let chat_tx = chat_tx.clone();
+                                    let sync_tx = sync_tx.clone();
+                                    let watch_tx = watch_tx.clone();
+                                    let runtime_sig = permission_runtime;
+                                    spawn(async move {
+                                        let Some(root) = pick_vault_dir().await else { return };
+                                        if let Err(err) = vault_actions::create_vault(&root) {
+                                            tracing::error!("failed to create vault: {err}");
+                                            return;
+                                        }
+                                        match Vault::load(&root) {
+                                            Ok(vault) => {
+                                                let root_path = vault.root.clone();
+                                                settings::save_last_vault(root_path.as_str());
+                                                app_state.write().vault = Some(vault);
+                                                app_state.write().current_note = None;
+                                                app_state.write().editor_content.clear();
+                                                app_state.write().editor_dirty = false;
+                                                let config = build_session_config(&runtime_sig, app_settings);
+                                                chat_tx.send(ChatCommand::StartSession { root: root_path.clone(), config });
+                                                sync_tx.send((root_path.clone(), SyncCommand::CheckStatus));
+                                                watch_tx.send(root_path);
+                                            }
+                                            Err(err) => tracing::error!("failed to init vault: {err}"),
+                                        }
+                                    });
+                                },
+                                "New Vault"
+                            }
                         }
-                    },
+                    }
                 }
-                ChatPanel {
-                    history: chat_history,
-                    status: session_status,
-                    claude_status,
-                    on_send: {
-                        let mut history = chat_history;
-                        let mut app_state = app_state;
-                        let chat_tx = chat_tx.clone();
-                        move |text: String| {
-                            handle_send(text, &mut app_state, &mut history, &chat_tx);
-                        }
-                    },
-                    on_interrupt: move |_| chat_tx.send(ChatCommand::Interrupt),
+            } else {
+                main {
+                    class: "workspace",
+                    style: "grid-template-columns: {sidebar_w}px {resize_w}px 1fr {chat_w}px",
+                    Sidebar {
+                        state: app_state,
+                        on_create_note: create_new_note,
+                        on_create_folder,
+                        on_move_note,
+                        on_delete_folder,
+                        on_reparent,
+                    }
+                    div {
+                        class: "sidebar-resize-handle",
+                        onmousedown: move |evt| {
+                            evt.prevent_default();
+                            is_resizing.set(true);
+                        },
+                    }
+                    Editor {
+                        state: app_state,
+                        on_command: {
+                            let mut history = chat_history;
+                            let mut app_state = app_state;
+                            let chat_tx = chat_tx.clone();
+                            move |text: String| {
+                                handle_send(text, &mut app_state, &mut history, &chat_tx);
+                            }
+                        },
+                    }
+                    ChatPanel {
+                        history: chat_history,
+                        status: session_status,
+                        claude_status,
+                        on_send: {
+                            let mut history = chat_history;
+                            let mut app_state = app_state;
+                            let chat_tx = chat_tx.clone();
+                            move |text: String| {
+                                handle_send(text, &mut app_state, &mut history, &chat_tx);
+                            }
+                        },
+                        on_interrupt: move |_| chat_tx.send(ChatCommand::Interrupt),
+                    }
                 }
             }
             PermissionModal { pending: pending_approvals, on_decision }
