@@ -642,6 +642,26 @@
         window.parent.postMessage({ type: 'ctrl-s' }, '*');
       }
     });
+
+    // Wikilink click navigation: detect [[target]] under the cursor.
+    document.getElementById('editor-root').addEventListener('click', function() {
+      var sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      var range = sel.getRangeAt(0);
+      var node = range.startContainer;
+      if (node.nodeType !== Node.TEXT_NODE) return;
+      var text = node.textContent;
+      var offset = range.startOffset;
+
+      var openBracket = text.lastIndexOf('[[', offset);
+      if (openBracket === -1) return;
+      var closeBracket = text.indexOf(']]', openBracket + 2);
+      if (closeBracket === -1 || closeBracket < offset) return;
+
+      var target = text.slice(openBracket + 2, closeBracket).trim();
+      if (!target) return;
+      window.parent.postMessage({ type: 'wikilink-click', target: target }, '*');
+    });
   </script>
 </body>
 </html>

@@ -65,7 +65,7 @@ Tables are stored inline as fenced blocks that degrade to readable JSON in other
 
 ## Features
 
-- **WYSIWYG markdown editor** powered by TipTap v2 — headings, bold, italic, strike, code, blockquote, lists, dividers
+- **WYSIWYG markdown editor** powered by TipTap v2 — headings, bold, italic, strike, code, blockquote, lists, dividers; click any `[[wikilink]]` to navigate to the linked note (matches by title or filename)
 - **Slash commands** — type `/` anywhere in the editor or chat to get an autocomplete palette; formatting commands apply instantly, action commands (note, daily, extract, explain, connect) go to the AI
 - **Inline data tables** — `glitch-table` fenced blocks render as interactive grids with sortable columns, typed cells (text, number, date, checkbox, select, formula), and inline add/delete; gap-cursor lets you click above or below a table to place the cursor there
 - **Streaming AI chat** — Claude Code CLI runs as a subprocess in `stream-json` mode; tool-use blocks surface as expandable cards; the AI always sees which note is open; hover any Claude text response to reveal a 🔊 button that reads it aloud via the Web Speech API; click 🎤 in the chat footer to speak — your words are transcribed and placed in the chat box

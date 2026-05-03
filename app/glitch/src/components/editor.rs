@@ -336,6 +336,33 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                 tiptap_slash_text.set(format!("/{q}"));
                             }
                         }
+                        Some("wikilink-click") => {
+                            if let Some(target) = val.get("target").and_then(|v| v.as_str()) {
+                                let target_lower = target.to_ascii_lowercase();
+                                let found = {
+                                    let snap = state.read();
+                                    snap.vault.as_ref().and_then(|v| {
+                                        v.notes.iter().find(|n| {
+                                            let title = n.title.to_ascii_lowercase();
+                                            let stem = n.id.0.file_stem().unwrap_or("").to_ascii_lowercase();
+                                            let stem_spaced = stem.replace('-', " ");
+                                            title == target_lower
+                                                || stem == target_lower
+                                                || stem_spaced == target_lower
+                                        }).map(|n| (n.id.clone(), n.absolute_path.clone()))
+                                    })
+                                };
+                                if let Some((id, path)) = found {
+                                    save_current(&mut state);
+                                    if let Ok(content) = std::fs::read_to_string(&path) {
+                                        let mut s = state.write();
+                                        s.current_note = Some(id);
+                                        s.editor_content = content;
+                                        s.editor_dirty = false;
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     },
                     Err(_) => break,
