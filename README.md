@@ -2,10 +2,6 @@
 
 Pure-Rust AI-native markdown knowledge base. Named for [the keytool from ReBoot](https://reboot.fandom.com/wiki/Glitch) — a tool that shapeshifts into whatever you need.
 
-## Status
-
-Pre-alpha.
-
 ## Architecture
 
 | Layer | Choice |
