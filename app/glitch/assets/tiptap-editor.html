@@ -139,6 +139,7 @@
     import Placeholder from 'https://esm.sh/@tiptap/extension-placeholder@2';
     import { Gapcursor } from 'https://esm.sh/@tiptap/extension-gapcursor@2';
     import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
+    import { Plugin } from 'https://esm.sh/prosemirror-state@1';
 
     const COL_TYPES = ['text', 'number', 'date', 'checkbox', 'select', 'formula'];
 
@@ -213,6 +214,7 @@
         const json = JSON.stringify(data, null, 2);
         currentJson = json;
         addingColumn = false;
+        render(); // update DOM immediately — don't wait for the ProseMirror round-trip
         const pos = typeof getPos === 'function' ? getPos() : undefined;
         if (pos == null) return;
         const nodeAtPos = editor.state.doc.nodeAt(pos);
@@ -493,6 +495,47 @@
     // GlitchCodeBlock — extends CodeBlock with the inline table NodeView
     // -------------------------------------------------------------------------
     const GlitchCodeBlock = CodeBlock.extend({
+      // Ensure every glitch-table block is surrounded by paragraph nodes so
+      // the user can always place the cursor above and below the table.
+      addProseMirrorPlugins() {
+        return [
+          new Plugin({
+            appendTransaction(trs, _old, newState) {
+              if (!trs.some(t => t.docChanged)) return null;
+              const { doc, schema } = newState;
+              const para = schema.nodes.paragraph;
+              const tr = newState.tr;
+              let changed = false;
+
+              // Snapshot top-level nodes from the original doc so positions are stable.
+              // Process in reverse so later insertions don't shift earlier offsets.
+              const topNodes = [];
+              doc.forEach((n, off) => topNodes.push({ n, off }));
+
+              for (let i = topNodes.length - 1; i >= 0; i--) {
+                const { n, off } = topNodes[i];
+                if (n.type.name !== 'codeBlock' || n.attrs.language !== 'glitch-table') continue;
+                const end = off + n.nodeSize;
+
+                // Paragraph after the table
+                if (!topNodes[i + 1] || topNodes[i + 1].n.type !== para) {
+                  tr.insert(tr.mapping.map(end), para.create());
+                  changed = true;
+                }
+                // Paragraph before the table
+                if (!topNodes[i - 1] || topNodes[i - 1].n.type !== para) {
+                  tr.insert(tr.mapping.map(off), para.create());
+                  changed = true;
+                }
+              }
+
+              if (changed) tr.setMeta('addToHistory', false);
+              return changed ? tr : null;
+            },
+          }),
+        ];
+      },
+
       addNodeView() {
         return ({ node, editor, getPos }) => {
           if (node.attrs.language === 'glitch-table') {
