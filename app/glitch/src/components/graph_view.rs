@@ -1,4 +1,4 @@
-//! Graph view (M7) — force-directed layout with typed edges.
+//! Graph view — force-directed layout with typed edges.
 //!
 //! Edge kinds (all togglable via filter chips):
 //!   Wikilink   — explicit `[[target]]` in note body  (solid accent)
@@ -267,9 +267,7 @@ const NODE_R: f32 = 7.0;
 
 #[component]
 pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
-    if !*visible.read() {
-        return rsx! { Fragment {} };
-    }
+    // ALL hooks must be called unconditionally before any early returns.
 
     // ── Filter chips ─────────────────────────────────────────────────────────
     let mut show_wikilink  = use_signal(|| true);
@@ -278,23 +276,21 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
     let mut show_keyword   = use_signal(|| false);
 
     // ── Pan / zoom state ─────────────────────────────────────────────────────
-    let mut pan_x      = use_signal(|| 0.0f32);
-    let mut pan_y      = use_signal(|| 0.0f32);
-    let mut zoom       = use_signal(|| 1.0f32);
-    let mut dragging   = use_signal(|| false);
-    let mut last_mx    = use_signal(|| 0.0f32);
-    let mut last_my    = use_signal(|| 0.0f32);
-    let mut down_mx    = use_signal(|| 0.0f32);  // mousedown origin for drag threshold
-    let mut down_my    = use_signal(|| 0.0f32);
+    let mut pan_x    = use_signal(|| 0.0f32);
+    let mut pan_y    = use_signal(|| 0.0f32);
+    let mut zoom     = use_signal(|| 1.0f32);
+    let mut dragging = use_signal(|| false);
+    let mut last_mx  = use_signal(|| 0.0f32);
+    let mut last_my  = use_signal(|| 0.0f32);
+    let mut down_mx  = use_signal(|| 0.0f32);
+    let mut down_my  = use_signal(|| 0.0f32);
 
     // ── Build graph (memoised — recomputes only when vault changes) ───────────
     let graph = use_memo(move || {
         state.read().vault.as_ref().map(|v| build_graph(v)).unwrap_or_default()
     });
 
-    // ── Layout (runs once per graph, synchronously; fast for < 300 notes) ────
-    // Only use intentional link edges (Wikilink/Related) for positioning.
-    // Hierarchy edges are O(n²) in dense folders and collapse everything together.
+    // ── Layout (runs once per graph; only Wikilink/Related edges for spacing) ─
     let positions = use_memo(move || {
         let g = graph.read();
         let edge_pairs: Vec<(usize, usize)> = g.edges.iter()
@@ -304,6 +300,32 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
         layout(g.nodes.len(), &edge_pairs, 300)
     });
 
+    // ── Auto-center on the currently open note when graph becomes visible ─────
+    // Reads `visible`, `state`, `graph`, `positions` — does NOT read pan/zoom,
+    // so setting pan/zoom here cannot re-trigger this effect.
+    use_effect(move || {
+        if !*visible.read() { return; }
+        let current_id = state.read().current_note.as_ref()
+            .map(|n| n.as_str().replace('\\', "/").to_string());
+        if let Some(id) = current_id {
+            let g = graph.read();
+            let pos = positions.read();
+            if let Some(idx) = g.nodes.iter().position(|n| n.id.replace('\\', "/") == id) {
+                if let Some(&(nx, ny)) = pos.get(idx) {
+                    let base_scale = fit_scale(&pos, SVG_W, SVG_H, MARGIN);
+                    pan_x.set(-nx * base_scale);
+                    pan_y.set(-ny * base_scale);
+                    zoom.set(1.0);
+                }
+            }
+        }
+    });
+
+    // ── Early-return when hidden (after all hooks) ────────────────────────────
+    if !*visible.read() {
+        return rsx! { Fragment {} };
+    }
+
     let g = graph.read();
     let pos = positions.read();
     let base_scale = fit_scale(&pos, SVG_W, SVG_H, MARGIN);
@@ -311,6 +333,10 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
     let cx = SVG_W / 2.0 + *pan_x.read();
     let cy = SVG_H / 2.0 + *pan_y.read();
     let transform_str = format!("translate({cx},{cy}) scale({scale})");
+
+    // ── Current note id for highlighting ─────────────────────────────────────
+    let current_note_id = state.read().current_note.as_ref()
+        .map(|n| n.as_str().replace('\\', "/").to_string());
 
     // ── Pre-compute render lists (avoids complex exprs inside rsx!) ──────────
     let active_kinds: HashSet<EdgeKind> = {
@@ -334,25 +360,26 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
             })
             .collect();
 
-    // Node render list: (cx, cy, label, rel_path, label_y, font_size, node_r)
+    // Node render list: (nx, ny, label, rel_path, is_current)
     let nr = NODE_R / scale;
     let nfont = (10.0f32 / scale).max(0.5);
-    let render_nodes: Vec<(f32, f32, String, String)> = g.nodes.iter().enumerate()
+    let render_nodes: Vec<(f32, f32, String, String, bool)> = g.nodes.iter().enumerate()
         .filter_map(|(i, node)| {
             let &(nx, ny) = pos.get(i)?;
+            let node_id_fwd = node.id.replace('\\', "/");
+            let is_current = current_note_id.as_deref() == Some(node_id_fwd.as_str());
             let label = if node.title.chars().count() > 18 {
                 let s: String = node.title.chars().take(17).collect();
                 format!("{s}…")
             } else {
                 node.title.clone()
             };
-            Some((nx, ny, label, node.id.clone()))
+            Some((nx, ny, label, node.id.clone(), is_current))
         })
         .collect();
 
     let cursor_style = if *dragging.read() { "display:block;cursor:grabbing" } else { "display:block;cursor:grab" };
-    let node_count = g.nodes.len();
-    let is_empty = node_count == 0;
+    let is_empty = g.nodes.is_empty();
     let close = move |_| visible.set(false);
 
     rsx! {
@@ -360,37 +387,36 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
 
             // ── Header ───────────────────────────────────────────────────
             header { class: "graph-header",
-                    h2 { class: "graph-title", "Graph" }
-                    div { class: "graph-filters",
-                        // Each chip is a toggle button
-                        button {
-                            class: if *show_wikilink.read() { "graph-chip active" } else { "graph-chip" },
-                            onclick: move |_| { let v = *show_wikilink.read(); show_wikilink.set(!v); },
-                            span { class: "chip-dot chip-wikilink" }
-                            "Wikilinks"
-                        }
-                        button {
-                            class: if *show_related.read() { "graph-chip active" } else { "graph-chip" },
-                            onclick: move |_| { let v = *show_related.read(); show_related.set(!v); },
-                            span { class: "chip-dot chip-related" }
-                            "Related"
-                        }
-                        button {
-                            class: if *show_hierarchy.read() { "graph-chip active" } else { "graph-chip" },
-                            onclick: move |_| { let v = *show_hierarchy.read(); show_hierarchy.set(!v); },
-                            span { class: "chip-dot chip-hierarchy" }
-                            "Hierarchy"
-                        }
-                        button {
-                            class: if *show_keyword.read() { "graph-chip active" } else { "graph-chip" },
-                            onclick: move |_| { let v = *show_keyword.read(); show_keyword.set(!v); },
-                            span { class: "chip-dot chip-keyword" }
-                            "Keywords"
-                        }
-                        span { class: "graph-count", "{g.nodes.len()} notes" }
+                h2 { class: "graph-title", "Graph" }
+                div { class: "graph-filters",
+                    button {
+                        class: if *show_wikilink.read() { "graph-chip active" } else { "graph-chip" },
+                        onclick: move |_| { let v = *show_wikilink.read(); show_wikilink.set(!v); },
+                        span { class: "chip-dot chip-wikilink" }
+                        "Wikilinks"
                     }
-                    button { class: "btn-link graph-close", onclick: close, "×" }
+                    button {
+                        class: if *show_related.read() { "graph-chip active" } else { "graph-chip" },
+                        onclick: move |_| { let v = *show_related.read(); show_related.set(!v); },
+                        span { class: "chip-dot chip-related" }
+                        "Related"
+                    }
+                    button {
+                        class: if *show_hierarchy.read() { "graph-chip active" } else { "graph-chip" },
+                        onclick: move |_| { let v = *show_hierarchy.read(); show_hierarchy.set(!v); },
+                        span { class: "chip-dot chip-hierarchy" }
+                        "Hierarchy"
+                    }
+                    button {
+                        class: if *show_keyword.read() { "graph-chip active" } else { "graph-chip" },
+                        onclick: move |_| { let v = *show_keyword.read(); show_keyword.set(!v); },
+                        span { class: "chip-dot chip-keyword" }
+                        "Keywords"
+                    }
+                    span { class: "graph-count", "{g.nodes.len()} notes" }
                 }
+                button { class: "btn-link graph-close", onclick: close, "×" }
+            }
 
             // ── SVG ──────────────────────────────────────────────────────
             svg {
@@ -402,104 +428,110 @@ pub fn GraphView(visible: Signal<bool>, state: Signal<AppState>) -> Element {
                 rect {
                     x: "0", y: "0",
                     width: "100%", height: "100%",
-                        fill: "transparent",
-                        onmousedown: move |evt| {
-                            let c = evt.data().client_coordinates();
-                            let mx = c.x as f32;
-                            let my = c.y as f32;
-                            last_mx.set(mx);
-                            last_my.set(my);
-                            down_mx.set(mx);
-                            down_my.set(my);
-                            dragging.set(true);
-                        },
-                        onmousemove: move |evt| {
-                            if !*dragging.read() { return; }
-                            let c = evt.data().client_coordinates();
-                            let mx = c.x as f32;
-                            let my = c.y as f32;
-                            // Only pan if moved more than 4px from the mousedown origin
-                            let dx = mx - *down_mx.read();
-                            let dy = my - *down_my.read();
-                            if dx * dx + dy * dy < 16.0 { return; }
-                            let old_px = *pan_x.read();
-                            let old_py = *pan_y.read();
-                            let old_lx = *last_mx.read();
-                            let old_ly = *last_my.read();
-                            pan_x.set(old_px + mx - old_lx);
-                            pan_y.set(old_py + my - old_ly);
-                            last_mx.set(mx);
-                            last_my.set(my);
-                        },
-                        onmouseup:    move |_| dragging.set(false),
-                        onmouseleave: move |_| dragging.set(false),
-                        onwheel: move |evt| {
-                            let delta = evt.data().delta().strip_units();
-                            let factor = if delta.y < 0.0 { 1.1f32 } else { 0.9f32 };
-                            let old_zoom = *zoom.read();
-                            zoom.set((old_zoom * factor).clamp(0.1, 10.0));
-                        },
-                    }
+                    fill: "transparent",
+                    onmousedown: move |evt| {
+                        let c = evt.data().client_coordinates();
+                        let mx = c.x as f32;
+                        let my = c.y as f32;
+                        last_mx.set(mx);
+                        last_my.set(my);
+                        down_mx.set(mx);
+                        down_my.set(my);
+                        dragging.set(true);
+                    },
+                    onmousemove: move |evt| {
+                        if !*dragging.read() { return; }
+                        let c = evt.data().client_coordinates();
+                        let mx = c.x as f32;
+                        let my = c.y as f32;
+                        // Only pan if moved more than 4px from the mousedown origin
+                        let dx = mx - *down_mx.read();
+                        let dy = my - *down_my.read();
+                        if dx * dx + dy * dy < 16.0 { return; }
+                        let old_px = *pan_x.read();
+                        let old_py = *pan_y.read();
+                        let old_lx = *last_mx.read();
+                        let old_ly = *last_my.read();
+                        pan_x.set(old_px + mx - old_lx);
+                        pan_y.set(old_py + my - old_ly);
+                        last_mx.set(mx);
+                        last_my.set(my);
+                    },
+                    onmouseup:    move |_| dragging.set(false),
+                    onmouseleave: move |_| dragging.set(false),
+                    onwheel: move |evt| {
+                        let delta = evt.data().delta().strip_units();
+                        let factor = if delta.y < 0.0 { 1.1f32 } else { 0.9f32 };
+                        let old_zoom = *zoom.read();
+                        zoom.set((old_zoom * factor).clamp(0.1, 10.0));
+                    },
+                }
 
-                    // Content group
-                    g { transform: "{transform_str}",
-                        // Edges (pre-computed, simple tuple iteration)
-                        for (x1, y1, x2, y2, stroke, sw, dasharray) in render_edges.iter() {
-                            line {
-                                x1: "{x1}", y1: "{y1}",
-                                x2: "{x2}", y2: "{y2}",
-                                stroke: "{stroke}",
-                                stroke_width: "{sw}",
-                                stroke_dasharray: "{dasharray}",
-                                opacity: "0.6",
-                            }
+                // Content group
+                g { transform: "{transform_str}",
+                    // Edges (pre-computed, simple tuple iteration)
+                    for (x1, y1, x2, y2, stroke, sw, dasharray) in render_edges.iter() {
+                        line {
+                            x1: "{x1}", y1: "{y1}",
+                            x2: "{x2}", y2: "{y2}",
+                            stroke: "{stroke}",
+                            stroke_width: "{sw}",
+                            stroke_dasharray: "{dasharray}",
+                            opacity: "0.6",
                         }
-                        // Nodes (pre-computed, simple tuple iteration)
-                        for (nx, ny, label, rel) in render_nodes.iter() {
-                            {
-                                let rel2 = rel.clone();
-                                let label2 = label.clone();
-                                let nx2 = *nx;
-                                let ny2 = *ny;
-                                let ly = ny2 + nr + nfont;
-                                let mut app_state = state;
-                                rsx! {
-                                    g {
-                                        style: "cursor:pointer",
-                                        onclick: move |evt| {
-                                            evt.stop_propagation();
-                                            let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
-                                            if let Some(root) = vault {
-                                                let abs = root.join(&rel2);
-                                                if let Ok(content) = std::fs::read_to_string(&abs) {
-                                                    let mut s = app_state.write();
-                                                    s.current_note = Some(glitch_core::NoteId::from_relative(rel2.clone()));
-                                                    s.editor_content = content;
-                                                    s.editor_dirty = false;
-                                                }
+                    }
+                    // Nodes (pre-computed, simple tuple iteration)
+                    for (nx, ny, label, rel, is_current) in render_nodes.iter() {
+                        {
+                            let rel2 = rel.clone();
+                            let label2 = label.clone();
+                            let nx2 = *nx;
+                            let ny2 = *ny;
+                            let is_cur = *is_current;
+                            let ly = ny2 + nr + nfont;
+                            let fill     = if is_cur { "#e0af68" } else { "#7aa2f7" };
+                            let stroke_c = if is_cur { "#c8943a" } else { "#5a7fe0" };
+                            let r_node   = if is_cur { nr * 1.4 } else { nr };
+                            let sw_node  = 0.5 / scale;
+                            let mut app_state = state;
+                            rsx! {
+                                g {
+                                    style: "cursor:pointer",
+                                    onclick: move |evt| {
+                                        evt.stop_propagation();
+                                        let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
+                                        if let Some(root) = vault {
+                                            let abs = root.join(&rel2);
+                                            if let Ok(content) = std::fs::read_to_string(&abs) {
+                                                let mut s = app_state.write();
+                                                s.current_note = Some(glitch_core::NoteId::from_relative(rel2.clone()));
+                                                s.editor_content = content;
+                                                s.editor_dirty = false;
                                             }
-                                            visible.set(false);
-                                        },
-                                        circle {
-                                            cx: "{nx2}", cy: "{ny2}",
-                                            r: "{nr}",
-                                            fill: "#7aa2f7",
-                                            stroke: "#5a7fe0",
-                                            stroke_width: "{0.5 / scale}",
                                         }
-                                        text {
-                                            x: "{nx2}", y: "{ly}",
-                                            font_size: "{nfont}",
-                                            fill: "#c0c8dd",
-                                            text_anchor: "middle",
-                                            pointer_events: "none",
-                                            "{label2}"
-                                        }
+                                        visible.set(false);
+                                    },
+                                    circle {
+                                        cx: "{nx2}", cy: "{ny2}",
+                                        r: "{r_node}",
+                                        fill: "{fill}",
+                                        stroke: "{stroke_c}",
+                                        stroke_width: "{sw_node}",
+                                    }
+                                    text {
+                                        x: "{nx2}", y: "{ly}",
+                                        font_size: "{nfont}",
+                                        fill: if is_cur { "#e0af68" } else { "#c0c8dd" },
+                                        text_anchor: "middle",
+                                        pointer_events: "none",
+                                        font_weight: if is_cur { "600" } else { "400" },
+                                        "{label2}"
                                     }
                                 }
                             }
                         }
                     }
+                }
 
                 // Empty state overlay
                 if is_empty {
