@@ -703,6 +703,10 @@
           return true;
         });
 
+      } else if (d.type === 'insert-wikilink') {
+        const text = `[[${d.path}|${d.title}]]`;
+        editor.chain().focus().insertContent({ type: 'text', text }).run();
+
       } else if (d.type === 'format-command') {
         // Clear the /command text the user typed, then apply the format.
         const { from } = editor.state.selection;

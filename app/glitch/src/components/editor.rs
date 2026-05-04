@@ -86,6 +86,16 @@ fn extract_wikilink_targets(content: &str) -> Vec<String> {
     out
 }
 
+fn insert_wikilink_in_tiptap(path: &str, title: &str) {
+    let json_path  = serde_json::to_string(path).unwrap_or_default();
+    let json_title = serde_json::to_string(title).unwrap_or_default();
+    document::eval(&format!(
+        "var f=document.getElementById('glitch-tiptap');\
+         if(f&&f.contentWindow)f.contentWindow.postMessage(\
+           {{type:'insert-wikilink',path:{json_path},title:{json_title}}},'*');",
+    ));
+}
+
 fn insert_table_in_tiptap() {
     document::eval(
         "var f=document.getElementById('glitch-tiptap');\
@@ -288,6 +298,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
     let mut related_state = use_signal(|| RelatedState::Idle);
     let mut backlinks_state = use_signal(|| BacklinksState::Idle);
     let mut backlinks_note: Signal<Option<String>> = use_signal(|| None);
+    let mut link_picker_open = use_signal(|| false);
 
     // Debounced auto-save: any dirty change triggers a 1.5s coalesced write.
     let save_tx = use_coroutine(move |mut rx: UnboundedReceiver<()>| async move {
@@ -793,6 +804,9 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                     let cmd = insertion.trim();
                                     if cmd == "/table" {
                                         insert_table_in_tiptap();
+                                    } else if cmd == "/link" {
+                                        clear_tiptap_slash();
+                                        link_picker_open.set(true);
                                     } else if let Some(fmt) = tiptap_cmd_for(cmd) {
                                         send_format_to_tiptap(fmt);
                                     } else {
@@ -808,6 +822,12 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                             id: "glitch-tiptap",
                             class: "tiptap-host",
                             src: TIPTAP_SRC,
+                        }
+                        if *link_picker_open.read() {
+                            LinkPicker {
+                                app_state: state,
+                                open: link_picker_open,
+                            }
                         }
                     }
                 }
@@ -1377,6 +1397,91 @@ fn BacklinksPanel(
                                     }
                                 },
                                 span { class: "related-title", "{title}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Link picker overlay
+// ---------------------------------------------------------------------------
+
+#[component]
+fn LinkPicker(app_state: Signal<AppState>, mut open: Signal<bool>) -> Element {
+    let mut query = use_signal(String::new);
+
+    let notes: Vec<(String, String)> = {
+        let snap = app_state.read();
+        if let Some(vault) = snap.vault.as_ref() {
+            let q = query.read().to_ascii_lowercase();
+            vault
+                .notes
+                .iter()
+                .filter(|n| {
+                    if q.is_empty() {
+                        return true;
+                    }
+                    n.title.to_ascii_lowercase().contains(&q)
+                        || n.id.as_str().to_ascii_lowercase().contains(&q)
+                })
+                .take(20)
+                .map(|n| {
+                    let path = n.id.as_str().replace('\\', "/").trim_end_matches(".md").to_string();
+                    let title = if n.title.is_empty() {
+                        path.rsplit('/').next().unwrap_or(&path).to_string()
+                    } else {
+                        n.title.clone()
+                    };
+                    (path, title)
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    };
+
+    rsx! {
+        div {
+            class: "link-picker-overlay",
+            onclick: move |_| open.set(false),
+            div {
+                class: "link-picker",
+                onclick: move |evt| evt.stop_propagation(),
+                input {
+                    class: "link-picker-input",
+                    placeholder: "Search notes…",
+                    autofocus: true,
+                    value: "{query}",
+                    oninput: move |evt| query.set(evt.value()),
+                    onkeydown: move |evt| {
+                        if evt.key() == Key::Escape {
+                            open.set(false);
+                        }
+                    },
+                }
+                div { class: "link-picker-list",
+                    for (path, title) in notes.iter() {
+                        {
+                            let path = path.clone();
+                            let title = title.clone();
+                            rsx! {
+                                button {
+                                    class: "link-picker-row",
+                                    onclick: {
+                                        let path = path.clone();
+                                        let title = title.clone();
+                                        move |_| {
+                                            insert_wikilink_in_tiptap(&path, &title);
+                                            open.set(false);
+                                        }
+                                    },
+                                    span { class: "link-picker-title", "{title}" }
+                                    span { class: "link-picker-path", "{path}" }
+                                }
                             }
                         }
                     }

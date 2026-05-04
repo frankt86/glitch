@@ -36,6 +36,7 @@ pub const COMMANDS: &[CommandHint] = &[
     CommandHint { name: "divider",  args: "", description: "Horizontal divider",insertion: "/divider",  tiptap_cmd: Some("divider") },
     // ── Data ──────────────────────────────────────────────────────────────────
     CommandHint { name: "table",    args: "", description: "Insert an interactive data table", insertion: "/table", tiptap_cmd: None },
+    CommandHint { name: "link",     args: "", description: "Insert a link to another note",    insertion: "/link",  tiptap_cmd: None },
     // ── Actions ───────────────────────────────────────────────────────────────
     CommandHint { name: "note",     args: "<title>", description: "Create a new note",           insertion: "/note ",    tiptap_cmd: None },
     CommandHint { name: "daily",   args: "",         description: "Open today's daily note",     insertion: "/daily",   tiptap_cmd: None },
