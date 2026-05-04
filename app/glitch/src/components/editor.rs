@@ -373,7 +373,11 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                         }
                         Some("wikilink-click") => {
                             if let Some(target) = val.get("target").and_then(|v| v.as_str()) {
-                                let target_lower = target.to_ascii_lowercase();
+                                // Strip pipe alias: [[path|alias]] → resolve "path"
+                                let raw = target.split('|').next().unwrap_or(target).trim();
+                                let target_lower = raw.to_ascii_lowercase().replace('\\', "/");
+                                let target_stem = target_lower.rsplit('/').next().unwrap_or(&target_lower)
+                                    .trim_end_matches(".md").to_string();
                                 let found = {
                                     let snap = state.read();
                                     snap.vault.as_ref().and_then(|v| {
@@ -381,9 +385,15 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                                             let title = n.title.to_ascii_lowercase();
                                             let stem = n.id.0.file_stem().unwrap_or("").to_ascii_lowercase();
                                             let stem_spaced = stem.replace('-', " ");
-                                            title == target_lower
-                                                || stem == target_lower
-                                                || stem_spaced == target_lower
+                                            let id_no_ext = n.id.as_str().to_ascii_lowercase()
+                                                .replace('\\', "/")
+                                                .trim_end_matches(".md")
+                                                .to_string();
+                                            id_no_ext == target_lower
+                                                || title == target_lower
+                                                || title == target_stem
+                                                || stem == target_stem
+                                                || stem_spaced == target_stem
                                         }).map(|n| (n.id.clone(), n.absolute_path.clone()))
                                     })
                                 };
@@ -504,6 +514,11 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
+            // rel path without extension, forward-slash normalised, for path-based matching
+            let current_rel_no_ext = rel.replace('\\', "/")
+                .trim_end_matches(".md")
+                .to_ascii_lowercase()
+                .to_string();
             let notes_to_scan: Vec<(String, String, std::path::PathBuf)> = vault
                 .notes
                 .iter()
@@ -516,14 +531,50 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
             spawn(async move {
                 let result = tokio::task::spawn_blocking(move || -> Vec<(String, String)> {
                     let stem_spaced = current_stem.replace('-', " ");
+
+                    // Extract `[[target]]` / `[[target|alias]]` targets from a note body.
+                    let extract_targets = |content: &str| -> Vec<String> {
+                        let mut targets = Vec::new();
+                        let bytes = content.as_bytes();
+                        let mut i = 0;
+                        while i + 1 < bytes.len() {
+                            if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+                                let start = i + 2;
+                                let mut j = start;
+                                while j + 1 < bytes.len() && !(bytes[j] == b']' && bytes[j + 1] == b']') {
+                                    j += 1;
+                                }
+                                if j + 1 < bytes.len() {
+                                    let inner = &content[start..j];
+                                    // Part before '|' is the target path; alias is display only.
+                                    let t = inner.split('|').next().unwrap_or(inner).trim();
+                                    if !t.is_empty() {
+                                        targets.push(t.to_ascii_lowercase().replace('\\', "/"));
+                                    }
+                                    i = j + 2;
+                                    continue;
+                                }
+                            }
+                            i += 1;
+                        }
+                        targets
+                    };
+
                     let mut found = Vec::new();
                     for (id_str, title, abs_path) in notes_to_scan {
                         let Ok(content) = std::fs::read_to_string(&abs_path) else { continue };
-                        let lower = content.to_ascii_lowercase();
-                        let matches = lower.contains(&format!("[[{current_title}]]"))
-                            || lower.contains(&format!("[[{current_stem}]]"))
-                            || (!stem_spaced.is_empty() && lower.contains(&format!("[[{stem_spaced}]]")));
-                        if matches {
+                        let linked = extract_targets(&content).into_iter().any(|t| {
+                            // Last path component (stem) of the target, for bare-name links
+                            let t_stem = t.rsplit('/').next().unwrap_or(&t)
+                                .trim_end_matches(".md")
+                                .to_string();
+                            t == current_rel_no_ext          // [[ESV/23_Isaiah|alias]] → path match
+                                || t == current_title        // [[Isaiah]] exact title
+                                || t_stem == current_stem    // [[23_Isaiah]] stem match
+                                || t_stem == stem_spaced     // [[23 Isaiah]] spaced stem
+                                || t_stem == current_title   // bare name matches title
+                        });
+                        if linked {
                             found.push((id_str, title));
                         }
                     }

@@ -239,32 +239,34 @@ pub fn Sidebar(
         nav { class: "sidebar",
             div { class: "sidebar-header",
                 span { class: "sidebar-count", "{total} notes" }
-                button {
-                    class: "sidebar-newbtn",
-                    disabled: !has_vault,
-                    title: "New note",
-                    onclick: move |_| {
-                        let next = !*new_note_open.read();
-                        new_note_open.set(next);
-                        if !next {
-                            new_note_title.set(String::new());
-                            new_note_type.set(String::new());
-                        }
-                        new_folder_open.set(false);
-                    },
-                    "+ 📄"
-                }
-                button {
-                    class: "sidebar-newbtn",
-                    disabled: !has_vault,
-                    title: "New folder",
-                    onclick: move |_| {
-                        let next = !*new_folder_open.read();
-                        new_folder_open.set(next);
-                        if !next { new_folder_name.set(String::new()); }
-                        new_note_open.set(false);
-                    },
-                    "+ 📁"
+                div { class: "sidebar-actions",
+                    button {
+                        class: "sidebar-newbtn",
+                        disabled: !has_vault,
+                        title: "New note",
+                        onclick: move |_| {
+                            let next = !*new_note_open.read();
+                            new_note_open.set(next);
+                            if !next {
+                                new_note_title.set(String::new());
+                                new_note_type.set(String::new());
+                            }
+                            new_folder_open.set(false);
+                        },
+                        "+ 📄"
+                    }
+                    button {
+                        class: "sidebar-newbtn",
+                        disabled: !has_vault,
+                        title: "New folder",
+                        onclick: move |_| {
+                            let next = !*new_folder_open.read();
+                            new_folder_open.set(next);
+                            if !next { new_folder_name.set(String::new()); }
+                            new_note_open.set(false);
+                        },
+                        "+ 📁"
+                    }
                 }
             }
             if has_vault {
