@@ -27,6 +27,15 @@
     .ProseMirror p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: #8a8f9d; pointer-events: none; float: left; height: 0; }
     .ProseMirror img { max-width: 100%; height: auto; display: block; margin: 8px 0; border-radius: 4px; }
 
+    /* ── Wikilink decorations ── */
+    .wikilink-raw { font-size: 0 !important; color: transparent !important; user-select: none; }
+    .wikilink-pill {
+      color: #7aa2f7; cursor: pointer;
+      background: rgba(122,162,247,0.12); border-radius: 4px;
+      padding: 0 5px 1px; font-size: 13px; display: inline;
+    }
+    .wikilink-pill:hover { background: rgba(122,162,247,0.24); text-decoration: underline; }
+
     /* ── Gap cursor (click between block nodes like tables) ── */
     .ProseMirror-gapcursor { display: none; pointer-events: none; position: absolute; }
     .ProseMirror-gapcursor::after {
@@ -132,7 +141,7 @@
   <div id="editor-root" style="display:none"></div>
 
   <script type="module">
-    import { Editor } from 'https://esm.sh/@tiptap/core@2';
+    import { Editor, Extension } from 'https://esm.sh/@tiptap/core@2';
     import StarterKit from 'https://esm.sh/@tiptap/starter-kit@2';
     import CodeBlock from 'https://esm.sh/@tiptap/extension-code-block@2';
     import Image from 'https://esm.sh/@tiptap/extension-image@2';
@@ -140,6 +149,7 @@
     import { Gapcursor } from 'https://esm.sh/@tiptap/extension-gapcursor@2';
     import { Markdown } from 'https://esm.sh/tiptap-markdown@0.8';
     import { Plugin } from 'https://esm.sh/prosemirror-state@1';
+    import { Decoration, DecorationSet } from 'https://esm.sh/prosemirror-view@1';
 
     const COL_TYPES = ['text', 'number', 'date', 'checkbox', 'select', 'formula'];
 
@@ -492,6 +502,61 @@
     }
 
     // -------------------------------------------------------------------------
+    // WikilinkPlugin — renders [[target|alias]] / [[target]] as clickable pills
+    // The raw [[...]] text is hidden via font-size:0; a widget span shows the alias.
+    // -------------------------------------------------------------------------
+    const WIKILINK_RE = /\[\[([^\]]+?)\]\]/g;
+
+    function buildWikilinkDecos(doc) {
+      const decos = [];
+      doc.descendants((node, pos) => {
+        if (!node.isText) return;
+        WIKILINK_RE.lastIndex = 0;
+        let m;
+        while ((m = WIKILINK_RE.exec(node.text)) !== null) {
+          const from = pos + m.index;
+          const to   = from + m[0].length;
+          const inner  = m[1];
+          const target = inner.split('|')[0].trim();
+          const alias  = inner.includes('|') ? inner.split('|')[1].trim()
+                       : target.includes('/') ? target.split('/').pop().replace(/_/g, ' ').replace(/-/g, ' ')
+                       : target;
+
+          // Hide the raw [[...]] text
+          decos.push(Decoration.inline(from, to, { class: 'wikilink-raw' }));
+
+          // Render a visible pill just before the hidden text
+          const pill = document.createElement('span');
+          pill.className = 'wikilink-pill';
+          pill.textContent = alias;
+          pill.title = target;
+          const capturedInner = inner;
+          pill.addEventListener('mousedown', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.parent.postMessage({ type: 'wikilink-click', target: capturedInner }, '*');
+          });
+          decos.push(Decoration.widget(from, pill, { side: -1, key: `wl-${from}` }));
+        }
+      });
+      return DecorationSet.create(doc, decos);
+    }
+
+    const WikilinkExtension = Extension.create({
+      addProseMirrorPlugins() {
+        return [new Plugin({
+          state: {
+            init(_, { doc }) { return buildWikilinkDecos(doc); },
+            apply(tr, old) { return tr.docChanged ? buildWikilinkDecos(tr.doc) : old; },
+          },
+          props: {
+            decorations(state) { return this.getState(state); },
+          },
+        })];
+      },
+    });
+
+    // -------------------------------------------------------------------------
     // GlitchCodeBlock — extends CodeBlock with the inline table NodeView
     // -------------------------------------------------------------------------
     const GlitchCodeBlock = CodeBlock.extend({
@@ -565,6 +630,7 @@
       extensions: [
         StarterKit.configure({ codeBlock: false }),
         GlitchCodeBlock,
+        WikilinkExtension,
         Image.configure({ allowBase64: true, inline: false }),
         Gapcursor,
         Placeholder.configure({ placeholder }),

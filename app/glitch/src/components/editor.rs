@@ -58,6 +58,34 @@ fn body_has_leading_h1(content: &str) -> bool {
     body.trim_start_matches('\n').starts_with("# ")
 }
 
+/// Extract the target portion of every `[[target]]` / `[[target|alias]]` wikilink in `content`.
+/// Returns lowercase, forward-slash normalised paths (the part before `|`).
+fn extract_wikilink_targets(content: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
+            let start = i + 2;
+            let mut j = start;
+            while j + 1 < bytes.len() && !(bytes[j] == b']' && bytes[j + 1] == b']') {
+                j += 1;
+            }
+            if j + 1 < bytes.len() {
+                let inner = &content[start..j];
+                let t = inner.split('|').next().unwrap_or(inner).trim();
+                if !t.is_empty() {
+                    out.push(t.to_ascii_lowercase().replace('\\', "/"));
+                }
+                i = j + 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
 fn insert_table_in_tiptap() {
     document::eval(
         "var f=document.getElementById('glitch-tiptap');\
@@ -491,16 +519,18 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
         }
     };
 
-    let on_backlinks_tab = {
-        let current_rel = current_rel.clone();
-        move |_| {
-            tab.set(EditorTab::Backlinks);
-            if let BacklinksState::Results { key, .. } = &*backlinks_state.read() {
-                if Some(key.as_str()) == current_rel.as_deref() {
-                    return;
-                }
+    let on_backlinks_tab = move |_| {
+        tab.set(EditorTab::Backlinks);
+        // Read current note from the signal at call time so we never act on a stale render capture.
+        let current_rel: Option<String> = state.read().current_note.as_ref()
+            .map(|id| id.as_str().to_string());
+        if let BacklinksState::Results { key, .. } = &*backlinks_state.read() {
+            if current_rel.as_deref() == Some(key.as_str()) {
+                return;
             }
-            let Some(rel) = current_rel.clone() else { return };
+        }
+        let Some(rel) = current_rel else { return };
+        {
             let snap = state.read();
             let Some(vault) = snap.vault.as_ref() else { return };
             let current_title = vault
@@ -531,39 +561,10 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
             spawn(async move {
                 let result = tokio::task::spawn_blocking(move || -> Vec<(String, String)> {
                     let stem_spaced = current_stem.replace('-', " ");
-
-                    // Extract `[[target]]` / `[[target|alias]]` targets from a note body.
-                    let extract_targets = |content: &str| -> Vec<String> {
-                        let mut targets = Vec::new();
-                        let bytes = content.as_bytes();
-                        let mut i = 0;
-                        while i + 1 < bytes.len() {
-                            if bytes[i] == b'[' && bytes[i + 1] == b'[' {
-                                let start = i + 2;
-                                let mut j = start;
-                                while j + 1 < bytes.len() && !(bytes[j] == b']' && bytes[j + 1] == b']') {
-                                    j += 1;
-                                }
-                                if j + 1 < bytes.len() {
-                                    let inner = &content[start..j];
-                                    // Part before '|' is the target path; alias is display only.
-                                    let t = inner.split('|').next().unwrap_or(inner).trim();
-                                    if !t.is_empty() {
-                                        targets.push(t.to_ascii_lowercase().replace('\\', "/"));
-                                    }
-                                    i = j + 2;
-                                    continue;
-                                }
-                            }
-                            i += 1;
-                        }
-                        targets
-                    };
-
                     let mut found = Vec::new();
                     for (id_str, title, abs_path) in notes_to_scan {
                         let Ok(content) = std::fs::read_to_string(&abs_path) else { continue };
-                        let linked = extract_targets(&content).into_iter().any(|t| {
+                        let linked = extract_wikilink_targets(&content).into_iter().any(|t| {
                             // Last path component (stem) of the target, for bare-name links
                             let t_stem = t.rsplit('/').next().unwrap_or(&t)
                                 .trim_end_matches(".md")
@@ -1148,6 +1149,7 @@ pub fn Editor(state: Signal<AppState>, on_command: EventHandler<String>) -> Elem
                 BacklinksPanel {
                     backlinks_state,
                     app_state: state,
+                    current_content: content.clone(),
                 }
             } else {
                 HistoryPanel {
@@ -1273,56 +1275,114 @@ fn RelatedPanel(
 fn BacklinksPanel(
     backlinks_state: Signal<BacklinksState>,
     app_state: Signal<AppState>,
+    current_content: String,
 ) -> Element {
-    match backlinks_state.read().clone() {
-        BacklinksState::Idle => rsx! {
-            div { class: "related-pane related-idle",
-                p { "Click the Backlinks tab to find notes that link here." }
-            }
-        },
-        BacklinksState::Loading => rsx! {
-            div { class: "related-pane related-loading",
-                p { "Scanning vault…" }
-            }
-        },
-        BacklinksState::Error(msg) => rsx! {
-            div { class: "related-pane related-error",
-                p { class: "related-error-msg", "Error: {msg}" }
-            }
-        },
-        BacklinksState::Results { links, .. } => rsx! {
-            div { class: "related-pane",
-                if links.is_empty() {
-                    p { class: "related-empty", "No other notes link to this one yet." }
-                } else {
-                    for (id_str, title) in links.iter() {
-                        {
-                            let id_str = id_str.clone();
-                            let title = title.clone();
-                            let mut app_state = app_state;
-                            rsx! {
-                                button {
-                                    class: "related-row",
-                                    onclick: move |_| {
-                                        let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
-                                        if let Some(root) = vault {
-                                            let abs = root.join(&id_str);
-                                            if let Ok(content) = std::fs::read_to_string(&abs) {
-                                                let mut s = app_state.write();
-                                                s.current_note = Some(glitch_core::NoteId::from_relative(id_str.clone()));
-                                                s.editor_content = content;
-                                                s.editor_dirty = false;
-                                            }
+    // ── Outgoing links: wikilinks found in the current note ───────────────────
+    let outgoing: Vec<(String, String)> = {
+        let snap = app_state.read();
+        if let Some(vault) = snap.vault.as_ref() {
+            let mut seen = std::collections::HashSet::new();
+            extract_wikilink_targets(&current_content)
+                .into_iter()
+                .filter_map(|target| {
+                    let t_stem = target.rsplit('/').next().unwrap_or(&target)
+                        .trim_end_matches(".md")
+                        .to_string();
+                    let note = vault.notes.iter().find(|n| {
+                        let title = n.title.to_ascii_lowercase();
+                        let stem = n.id.0.file_stem().unwrap_or("").to_ascii_lowercase();
+                        let id_no_ext = n.id.as_str().to_ascii_lowercase()
+                            .replace('\\', "/")
+                            .trim_end_matches(".md")
+                            .to_string();
+                        id_no_ext == target || title == target || stem == t_stem || title == t_stem
+                    })?;
+                    let id = note.id.as_str().to_string();
+                    if seen.insert(id.clone()) { Some((id, note.title.clone())) } else { None }
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    };
+
+    // ── Backlinks section pre-computed ────────────────────────────────────────
+    let bl_snap = backlinks_state.read().clone();
+    let bl_scanning = matches!(bl_snap, BacklinksState::Idle | BacklinksState::Loading);
+    let bl_err = if let BacklinksState::Error(ref e) = bl_snap { e.clone() } else { String::new() };
+    let bl_links = if let BacklinksState::Results { ref links, .. } = bl_snap { links.clone() } else { vec![] };
+
+    rsx! {
+        div { class: "related-pane",
+
+            // ── Links in this note ────────────────────────────────────────────
+            p { class: "backlinks-section-label", "Links in this note" }
+            if outgoing.is_empty() {
+                p { class: "related-empty", "No wikilinks in this note." }
+            } else {
+                for (id_str, title) in outgoing.iter() {
+                    {
+                        let id_str = id_str.clone();
+                        let title = title.clone();
+                        let mut app_state = app_state;
+                        rsx! {
+                            button {
+                                class: "related-row",
+                                onclick: move |_| {
+                                    let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
+                                    if let Some(root) = vault {
+                                        let abs = root.join(&id_str);
+                                        if let Ok(content) = std::fs::read_to_string(&abs) {
+                                            let mut s = app_state.write();
+                                            s.current_note = Some(glitch_core::NoteId::from_relative(id_str.clone()));
+                                            s.editor_content = content;
+                                            s.editor_dirty = false;
                                         }
-                                    },
-                                    span { class: "related-title", "{title}" }
-                                }
+                                    }
+                                },
+                                span { class: "related-title", "{title}" }
                             }
                         }
                     }
                 }
             }
-        },
+
+            // ── Notes linking here ────────────────────────────────────────────
+            p { class: "backlinks-section-label", "Notes linking here" }
+            if bl_scanning {
+                p { class: "related-loading", "Scanning vault…" }
+            } else if !bl_err.is_empty() {
+                p { class: "related-error-msg", "Error: {bl_err}" }
+            } else if bl_links.is_empty() {
+                p { class: "related-empty", "No other notes link to this one yet." }
+            } else {
+                for (id_str, title) in bl_links.iter() {
+                    {
+                        let id_str = id_str.clone();
+                        let title = title.clone();
+                        let mut app_state = app_state;
+                        rsx! {
+                            button {
+                                class: "related-row",
+                                onclick: move |_| {
+                                    let vault = app_state.read().vault.as_ref().map(|v| v.root.clone());
+                                    if let Some(root) = vault {
+                                        let abs = root.join(&id_str);
+                                        if let Ok(content) = std::fs::read_to_string(&abs) {
+                                            let mut s = app_state.write();
+                                            s.current_note = Some(glitch_core::NoteId::from_relative(id_str.clone()));
+                                            s.editor_content = content;
+                                            s.editor_dirty = false;
+                                        }
+                                    }
+                                },
+                                span { class: "related-title", "{title}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

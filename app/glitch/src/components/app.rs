@@ -466,7 +466,7 @@ pub fn App() -> Element {
                         sidebar_collapsed.set(c);
                         app_menu::set_notes_panel_checked(!c);
                     },
-                    if *sidebar_collapsed.read() { "⊢" } else { "⊣" }
+                    if *sidebar_collapsed.read() { "›" } else { "‹" }
                 }
 
                 // Vault path (flex: 1, centered)
@@ -487,7 +487,7 @@ pub fn App() -> Element {
                         chat_collapsed.set(c);
                         app_menu::set_claude_panel_checked(!c);
                     },
-                    if *chat_collapsed.read() { "⊣" } else { "⊢" }
+                    if *chat_collapsed.read() { "‹" } else { "›" }
                 }
             }
             // Sync error banner — shows full error text, dismissible.
